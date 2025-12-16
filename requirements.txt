@@ -1,0 +1,45 @@
+# Production dependencies for Dumacle Backend
+# Generated from pyproject.toml
+
+# Core Framework
+fastapi>=0.124.4
+uvicorn[standard]>=0.38.0
+
+# Database
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# Validation & Settings
+pydantic[email]>=2.12.5
+pydantic-settings>=2.7.1
+
+# Authentication & Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# File Handling
+python-multipart>=0.0.12
+
+# Task Queue
+celery[redis]>=5.4.0
+redis>=5.2.0
+
+# Storage
+boto3>=1.35.0
+
+# Payments
+stripe>=11.0.0
+
+# Video Processing
+ffmpeg-python>=0.2.0
+
+# HTTP Client
+httpx>=0.28.1
+
+# Rate Limiting
+slowapi>=0.1.9
+
+# Logging
+structlog>=24.4.0
+

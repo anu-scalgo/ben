@@ -44,57 +44,23 @@ dumacle-backend/
 
 ## Setup & Installation
 
-### Prerequisites
+For detailed installation and configuration instructions, please refer to the **[Installation Guide](INSTALLATION.md)**.
 
-- Python 3.12+
-- PostgreSQL 14+
-- Redis 6+
-- FFmpeg (for transcoding)
-- Poetry (recommended) or pip
+The guide covers:
+- System Prerequisites
+- Local Development Setup (PostgreSQL + Poetry)
+- Docker Setup
+- Environment Variables
+- Troubleshooting
 
-### Installation
+### Quick Start (Local)
 
-1. **Clone and navigate to the project**:
-   ```bash
-   cd /home/scalgo/Desktop/ben
-   ```
+1.  **Install dependencies**: `poetry install`
+2.  **Configure environment**: `cp .env.example .env` (ensure PostgreSQL URL)
+3.  **Run migrations**: `poetry run alembic upgrade head`
+4.  **Start server**: `poetry run uvicorn src.main:app --reload`
 
-2. **Install dependencies** (using Poetry):
-   ```bash
-   poetry install
-   ```
-
-   Or using pip:
-   ```bash
-   pip install -e .
-   ```
-
-3. **Set up environment variables**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-4. **Initialize Alembic** (if not already done):
-   ```bash
-   alembic init alembic
-   alembic revision --autogenerate -m "init models"
-   alembic upgrade head
-   ```
-
-5. **Run database migrations**:
-   ```bash
-   alembic upgrade head
-   ```
-
-6. **Seed initial data** (optional):
-   ```bash
-   python scripts/seed.py
-   ```
-
-## Running the Application
-
-### Development
+### Development (Legacy/Manual)
 
 Start the FastAPI server with auto-reload:
 ```bash

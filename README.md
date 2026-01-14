@@ -5,6 +5,7 @@ FastAPI backend for Dumacle with async I/O, video transcoding, and multi-storage
 ## Features
 
 - **Async-First Architecture**: Built with FastAPI for high-performance async I/O operations
+- **User Management**: Role-Based Access Control (RBAC) with Superadmin, Admin, and Enduser roles
 - **Type Safety**: Pydantic v2 for schema validation and auto-generated OpenAPI docs
 - **Multi-Storage Support**: S3, Oracle Cloud Storage, and Wasabi integration
 - **Video Transcoding**: FFmpeg-based transcoding with Celery background workers
@@ -189,6 +190,14 @@ Key environment variables (see `.env.example` for full list):
 ### Authentication
 - `POST /auth/register` - Register new user
 - `POST /auth/login` - Login and get JWT token
+
+### Users
+- `POST /users` - Create a new user (Admin/Superadmin only)
+- `GET /users` - List all users (Admin/Superadmin only)
+- `GET /users/me` - Get current user profile
+- `GET /users/{user_id}` - Get specific user details
+- `PATCH /users/{user_id}` - Update user details
+
 
 ### Plans
 - `GET /plans` - List available subscription plans

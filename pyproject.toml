@@ -28,6 +28,7 @@ slowapi = "^0.1.9"
 structlog = "^24.4.0"
 aiosqlite = "^0.22.1"
 psycopg2-binary = "^2.9.11"
+bcrypt = "3.2.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"

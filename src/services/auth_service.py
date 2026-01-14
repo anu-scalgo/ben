@@ -31,13 +31,13 @@ class AuthService:
                 detail="Incorrect email or password",
             )
 
-        if not verify_password(login_data.password, user.get("hashed_password", "")):
+        if not verify_password(login_data.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
             )
 
-        if not user.get("is_active", False):
+        if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is inactive",
@@ -47,7 +47,8 @@ class AuthService:
             minutes=settings.jwt_access_token_expire_minutes
         )
         access_token = create_access_token(
-            data={"sub": str(user["id"])}, expires_delta=access_token_expires
+            data={"sub": str(user.id), "role": user.role.value},
+            expires_delta=access_token_expires,
         )
 
         return TokenResponse(
@@ -77,11 +78,5 @@ class AuthService:
             full_name=register_data.full_name,
         )
 
-        return UserResponse(
-            id=user["id"],
-            email=user["email"],
-            full_name=user["full_name"],
-            is_active=user.get("is_active", True),
-            created_at=user.get("created_at", ""),
-        )
+        return user
 

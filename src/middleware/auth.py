@@ -14,10 +14,12 @@ from ..schemas.auth import TokenData
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
+from ..models.user import User
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> User:
     """
     Dependency to get current authenticated user from JWT token.
     Raises HTTPException if token is invalid or user not found.

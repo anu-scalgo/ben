@@ -14,6 +14,7 @@ from alembic import context
 
 from src.config.database import Base
 from src.config import settings
+from src.models.user import User
 
 # this is the Alembic Config object
 config = context.config

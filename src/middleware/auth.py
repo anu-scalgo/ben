@@ -71,3 +71,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     )
     return encoded_jwt
 
+
+def check_admin_privileges(user: User):
+    """Check if user has admin privileges."""
+    from ..models.user import UserRole  # specific import to avoid circular dependency
+    if user.role not in [UserRole.SUPERADMIN, UserRole.ADMIN]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough privileges",
+        )
+
+
+def check_superadmin_privileges(user: User):
+    """Check if user has superadmin privileges."""
+    from ..models.user import UserRole
+    if user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough privileges",
+        )
+

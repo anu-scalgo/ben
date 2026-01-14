@@ -16,6 +16,10 @@ class DumaPodBase(BaseModel):
     enable_s3: bool = False
     enable_wasabi: bool = False
     enable_oracle_os: bool = False
+
+    use_custom_s3: bool = False
+    use_custom_wasabi: bool = False
+    use_custom_oracle: bool = False
     
     primary_storage: StorageProvider
     secondary_storage: Optional[StorageProvider] = None

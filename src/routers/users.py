@@ -7,30 +7,12 @@ from ..config.database import get_db
 from ..services.user_service import UserService
 from ..schemas.user import UserCreate, UserUpdate
 from ..schemas.auth import UserResponse
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_user, check_admin_privileges, check_superadmin_privileges
 from ..models.user import User, UserRole
 from ..middleware.rate_limit import limiter
 from fastapi import Request
 
 router = APIRouter(prefix="/users", tags=["users"])
-
-
-def check_admin_privileges(user: User):
-    """Check if user has admin privileges."""
-    if user.role not in [UserRole.SUPERADMIN, UserRole.ADMIN]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough privileges",
-        )
-
-
-def check_superadmin_privileges(user: User):
-    """Check if user has superadmin privileges."""
-    if user.role != UserRole.SUPERADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough privileges",
-        )
 
 
 @router.get("", response_model=List[UserResponse])

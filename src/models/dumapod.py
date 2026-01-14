@@ -39,6 +39,10 @@ class DumaPod(Base):
     secondary_storage: Mapped[Optional[StorageProvider]] = mapped_column(
         Enum(StorageProvider), nullable=True
     )
+
+    use_custom_s3: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    use_custom_wasabi: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    use_custom_oracle: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -55,3 +59,4 @@ class DumaPod(Base):
     )
 
     creator = relationship("User", backref="created_dumapods")
+    credentials = relationship("StorageCredential", back_populates="dumapod", cascade="all, delete-orphan")

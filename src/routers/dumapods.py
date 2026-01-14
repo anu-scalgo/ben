@@ -6,9 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config.database import get_db
 from ..services.dumapod_service import DumaPodService
 from ..schemas.dumapod import DumaPodCreate, DumaPodUpdate, DumaPodResponse
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_user, check_admin_privileges
 from ..models.user import User
-from ..routers.users import check_admin_privileges
 from fastapi import Request
 
 router = APIRouter(prefix="/dumapods", tags=["dumapods"])

@@ -11,6 +11,9 @@ from ..schemas.file import FileResponse, FileListResponse, FileDownloadResponse
 from ..utils.helpers import bytes_to_gb, sanitize_filename
 from ..utils.constants import UploadStatus
 from ..middleware.validation import validate_file_upload
+from .dumapod_service import DumaPodService
+from .credential_service import CredentialService
+from ..models.dumapod import StorageProvider
 
 
 class FileService:
@@ -22,6 +25,8 @@ class FileService:
         self.storage_repo = StorageRepository()
         self.queue_repo = QueueRepository()
         self.subscription_repo = SubscriptionRepository(db)
+        self.dumapod_service = DumaPodService(db)
+        self.credential_service = CredentialService(db)
 
     async def handle_upload(
         self, user_id: int, file: UploadFile, description: Optional[str] = None
@@ -51,6 +56,31 @@ class FileService:
                 detail="Storage quota exceeded",
             )
 
+        # Subscribe/DumaPod Logic
+        dumapod_id = subscription.get("plan_id")
+        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        
+        # Access dict fields if dict
+        if isinstance(dumapod, dict):
+            provider = dumapod.get("primary_storage")
+            use_s3 = dumapod.get("use_custom_s3")
+            use_wasabi = dumapod.get("use_custom_wasabi")
+            use_oracle = dumapod.get("use_custom_oracle")
+        else:
+            provider = dumapod.primary_storage
+            use_s3 = dumapod.use_custom_s3
+            use_wasabi = dumapod.use_custom_wasabi
+            use_oracle = dumapod.use_custom_oracle
+
+        # Determine credentials
+        credentials = None
+        if provider == StorageProvider.AWS_S3 and use_s3:
+            credentials = await self.credential_service.repo.get_by_dumapod_and_provider(dumapod_id, StorageProvider.AWS_S3)
+        elif provider == StorageProvider.WASABI and use_wasabi:
+            credentials = await self.credential_service.repo.get_by_dumapod_and_provider(dumapod_id, StorageProvider.WASABI)
+        elif provider == StorageProvider.ORACLE_OS and use_oracle:
+            credentials = await self.credential_service.repo.get_by_dumapod_and_provider(dumapod_id, StorageProvider.ORACLE_OS)
+
         # Generate storage key
         sanitized_filename = sanitize_filename(file.filename or "unnamed")
         storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
@@ -60,6 +90,8 @@ class FileService:
             file_content=file_content,
             key=storage_key,
             content_type=file.content_type or "application/octet-stream",
+            provider=provider,
+            credentials=credentials
         )
 
         # Create file metadata
@@ -70,7 +102,7 @@ class FileService:
             content_type=file.content_type or "application/octet-stream",
             file_size=file_size,
             storage_key=storage_key,
-            storage_provider="s3",  # Would get from config
+            storage_provider=provider.value if hasattr(provider, 'value') else provider,
             description=description,
         )
 

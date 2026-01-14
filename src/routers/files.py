@@ -1,6 +1,6 @@
 """File upload and management routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from ..config.database import get_db
@@ -18,19 +18,20 @@ router = APIRouter(prefix="/files", tags=["files"])
 @limiter.limit("20/minute")
 async def upload_file(
     request: Request,
+    dumapod_id: int = Form(...),
     file: UploadFile = File(...),
-    description: Optional[str] = None,
+    description: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Upload a file.
+    Upload a file to a specific DumaPod.
     Supports streaming uploads for large files.
     Automatically enqueues transcoding for video files.
     """
     file_service = FileService(db)
     return await file_service.handle_upload(
-        user_id=user["id"], file=file, description=description
+        user_id=user["id"], dumapod_id=dumapod_id, file=file, description=description
     )
 
 

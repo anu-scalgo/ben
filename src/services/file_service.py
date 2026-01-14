@@ -11,6 +11,10 @@ from ..schemas.file import FileResponse, FileListResponse, FileDownloadResponse
 from ..utils.helpers import bytes_to_gb, sanitize_filename
 from ..utils.constants import UploadStatus
 from ..middleware.validation import validate_file_upload
+from .dumapod_service import DumaPodService
+from .credential_service import CredentialService
+from ..models.dumapod import StorageProvider, DumaPod
+from ..repositories.duma_stored_file_repo import DumaStoredFileRepository
 
 
 class FileService:
@@ -22,12 +26,15 @@ class FileService:
         self.storage_repo = StorageRepository()
         self.queue_repo = QueueRepository()
         self.subscription_repo = SubscriptionRepository(db)
+        self.dumapod_service = DumaPodService(db)
+        self.credential_service = CredentialService(db)
+        self.duma_file_repo = DumaStoredFileRepository(db)
 
     async def handle_upload(
-        self, user_id: int, file: UploadFile, description: Optional[str] = None
+        self, user_id: int, dumapod_id: int, file: UploadFile, description: Optional[str] = None
     ) -> FileResponse:
         """
-        Handle file upload: validate, upload to storage, create metadata, enqueue transcoding.
+        Handle file upload: validate, capacity check, upload to multiple providers, create metadata.
         """
         # Validate file
         validate_file_upload(file)
@@ -35,76 +42,154 @@ class FileService:
         # Read file content
         file_content = await file.read()
         file_size = len(file_content)
+        
+        # 1. Get DumaPod & Check Capacity
+        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
+        
+        # Normalize DumaPod Data
+        if isinstance(dumapod, dict):
+            limit_gb = dumapod.get("storage_capacity_gb")
+            
+            enable_s3 = dumapod.get("enable_s3")
+            enable_wasabi = dumapod.get("enable_wasabi")
+            enable_oracle = dumapod.get("enable_oracle_os")
+            
+            use_s3 = dumapod.get("use_custom_s3")
+            use_wasabi = dumapod.get("use_custom_wasabi")
+            use_oracle = dumapod.get("use_custom_oracle")
+            
+            primary_storage = dumapod.get("primary_storage")
+        else:
+            limit_gb = dumapod.storage_capacity_gb
+            
+            enable_s3 = dumapod.enable_s3
+            enable_wasabi = dumapod.enable_wasabi
+            enable_oracle = dumapod.enable_oracle_os
+            
+            use_s3 = dumapod.use_custom_s3
+            use_wasabi = dumapod.use_custom_wasabi
+            use_oracle = dumapod.use_custom_oracle
+            
+            primary_storage = dumapod.primary_storage
 
-        # Check quota
-        subscription = await self.subscription_repo.get_by_user_id(user_id)
-        if not subscription:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No active subscription found",
+        # Convert capacity to bytes (GB -> Bytes)
+        capacity_bytes = limit_gb * 1024 * 1024 * 1024
+        
+        if current_usage_bytes + file_size > capacity_bytes:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Upload exceeds DumaPod storage capacity. Limit: {limit_gb} GB."
             )
 
-        storage_gb = bytes_to_gb(file_size)
-        if subscription["used_storage_gb"] + storage_gb > subscription["storage_limit_gb"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Storage quota exceeded",
+        # 2. Determine Enabled Providers and Credentials
+        providers_to_upload = []
+        
+        # Helper to prepare provider config
+        async def prepare_provider(provider_type: StorageProvider, use_custom: bool):
+            if not use_custom:
+                # Use default credentials
+                return {"provider": provider_type, "credentials": None}
+            
+            # Fetch custom credentials
+            creds = await self.credential_service.repo.get_by_dumapod_and_provider(dumapod_id, provider_type)
+            if not creds:
+                 raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Custom credentials for {provider_type} enabled but not found."
+                )
+            return {"provider": provider_type, "credentials": creds}
+
+        # Check Providers
+        if enable_s3:
+            providers_to_upload.append(await prepare_provider(StorageProvider.AWS_S3, use_s3))
+        if enable_wasabi:
+             providers_to_upload.append(await prepare_provider(StorageProvider.WASABI, use_wasabi))
+        if enable_oracle:
+             providers_to_upload.append(await prepare_provider(StorageProvider.ORACLE_OS, use_oracle))
+             
+        if not providers_to_upload:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No storage providers enabled for this DumaPod."
             )
 
-        # Generate storage key
+        # 3. Upload to All Enabled Providers
         sanitized_filename = sanitize_filename(file.filename or "unnamed")
         storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
+        
+        upload_urls = {}
+        
+        for p_config in providers_to_upload:
+            p_type = p_config["provider"]
+            creds = p_config["credentials"]
+            
+            # Upload
+            await self.storage_repo.upload_file(
+                file_content=file_content,
+                key=storage_key,
+                content_type=file.content_type or "application/octet-stream",
+                provider=p_type,
+                credentials=creds
+            )
+            
+            # Generate URL (Presigned for download, or just key/location reference?)
+            # Requirement says "save that return file links". 
+            # Ideally we save the Key, but if we need a link, maybe a permanent public link or just the key?
+            # "file link from that services will saved" -> implies URL.
+            # But S3 private buckets have expiring URLs. 
+            # For now, let's store the Key or try to generate a long-lived URL if possible, 
+            # OR simply store the Storage Key and generate URLs on read.
+            # However, logic explicitly asks to SAVE file links. 
+            # I will generate specific URLs for now, possibly presigned with long duration or public URL structure.
+            # Given typical restrictions, storing the KEY + Provider is best practice, but adhering to prompt:
+            # "receive the response of the storage services and the file link from that services will saved"
+            # I'll store the object URL (e.g. s3://bucket/key or https://bucket.s3.region.amazonaws.com/key).
+            
+            # Let's construct a standard HTTP URL for reference if possible, or just the S3 URI.
+            bucket_name = creds.bucket_name if creds else await self.storage_repo._get_bucket(p_type)
+            # Simple construction for now, ideally repo has a method `get_object_url`.
+            # I'll rely on a new helper or simple string formatting.
+            
+            p_value = p_type.value if hasattr(p_type, 'value') else p_type
+            url = f"{p_value}://{bucket_name}/{storage_key}" # Placeholder URI format
+            if p_type == StorageProvider.AWS_S3:
+                upload_urls["s3_url"] = url
+            elif p_type == StorageProvider.WASABI:
+                upload_urls["wasabi_url"] = url
+            elif p_type == StorageProvider.ORACLE_OS:
+                upload_urls["oracle_url"] = url
 
-        # Upload to storage
-        await self.storage_repo.upload_file(
-            file_content=file_content,
-            key=storage_key,
-            content_type=file.content_type or "application/octet-stream",
-        )
-
-        # Create file metadata
-        file_record = await self.file_repo.create_file(
+        # 4. Save Metadata
+        stored_file = await self.duma_file_repo.create_file_record(
+            dumapod_id=dumapod_id,
             user_id=user_id,
-            filename=storage_key.split("/")[-1],
-            original_filename=file.filename or "unnamed",
-            content_type=file.content_type or "application/octet-stream",
+            file_name=sanitized_filename,
+            file_type=file.content_type or "application/octet-stream",
             file_size=file_size,
-            storage_key=storage_key,
-            storage_provider="s3",  # Would get from config
-            description=description,
+            s3_url=upload_urls.get("s3_url"),
+            wasabi_url=upload_urls.get("wasabi_url"),
+            oracle_url=upload_urls.get("oracle_url")
         )
-
-        # Update quota
-        await self.subscription_repo.update_quota(
-            subscription["id"], storage_gb=storage_gb, file_count=1
-        )
-
-        # Enqueue transcoding if video file
-        if file.content_type and file.content_type.startswith("video/"):
-            await self.file_repo.update_upload_status(
-                file_record["id"], UploadStatus.PROCESSING.value
-            )
-            self.queue_repo.enqueue_transcode(
-                file_id=file_record["id"],
-                storage_key=storage_key,
-                storage_provider="s3",
-                output_formats=["mp4", "webm"],
-            )
 
         return FileResponse(
-            id=file_record["id"],
-            user_id=file_record["user_id"],
-            filename=file_record["filename"],
-            original_filename=file_record["original_filename"],
-            content_type=file_record["content_type"],
-            file_size=file_record["file_size"],
-            storage_key=file_record["storage_key"],
-            storage_provider=file_record["storage_provider"],
-            description=file_record.get("description"),
-            transcoded_urls=file_record.get("transcoded_urls", []),
-            upload_status=file_record["upload_status"],
-            created_at=file_record.get("created_at", ""),
-            updated_at=file_record.get("updated_at", ""),
+            id=stored_file.id,
+            user_id=stored_file.user_id,
+            filename=stored_file.file_name,
+            original_filename=stored_file.file_name,
+            content_type=stored_file.file_type,
+            file_size=stored_file.file_size,
+            storage_key=storage_key, # Keeping compatibility with response schema
+            storage_provider=primary_storage, # Primary as reference
+            description=description,
+            upload_status="completed",
+            
+            s3_url=stored_file.s3_url,
+            wasabi_url=stored_file.wasabi_url,
+            oracle_url=stored_file.oracle_url,
+            
+            created_at=stored_file.created_at,
+            updated_at=stored_file.created_at # Using created_at for updated_at placeholder
         )
 
     async def get_file_details(self, file_id: int, user_id: int) -> FileResponse:

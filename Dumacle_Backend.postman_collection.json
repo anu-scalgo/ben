@@ -153,7 +153,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Gold Storage Plan\",\n    \"storage_capacity_gb\": 1000,\n    \"enable_s3\": true,\n    \"enable_wasabi\": false,\n    \"enable_oracle_os\": false,\n    \"primary_storage\": \"aws_s3\",\n    \"amount_in_usd\": 99.99,\n    \"is_active\": true\n}",
+							"raw": "{\n    \"name\": \"Gold Storage Plan\",\n    \"storage_capacity_gb\": 1000,\n    \"enable_s3\": true,\n    \"enable_wasabi\": false,\n    \"enable_oracle_os\": false,\n    \"use_custom_s3\": false,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false,\n    \"primary_storage\": \"aws_s3\",\n    \"amount_in_usd\": 99.99,\n    \"is_active\": true\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -214,7 +214,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Gold Storage Plan (Updated)\",\n    \"amount_in_usd\": 109.99\n}",
+							"raw": "{\n    \"name\": \"Gold Storage Plan (Updated)\",\n    \"amount_in_usd\": 109.99,\n    \"use_custom_s3\": true,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -247,6 +247,214 @@
 							"path": [
 								"dumapods",
 								"{{pod_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Storage Credentials",
+			"item": [
+				{
+					"name": "Add Credential",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"provider\": \"aws_s3\",\n    \"access_key\": \"YOUR_ACCESS_KEY\",\n    \"secret_key\": \"YOUR_SECRET_KEY\",\n    \"bucket_name\": \"custom-bucket\",\n    \"region\": \"us-east-1\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/dumapods/{{pod_id}}/credentials",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods",
+								"{{pod_id}}",
+								"credentials"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List Credentials",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/dumapods/{{pod_id}}/credentials",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods",
+								"{{pod_id}}",
+								"credentials"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Credential",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"access_key\": \"NEW_ACCESS_KEY\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/dumapods/{{pod_id}}/credentials/{{credential_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods",
+								"{{pod_id}}",
+								"credentials",
+								"{{credential_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Credential",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/dumapods/{{pod_id}}/credentials/{{credential_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods",
+								"{{pod_id}}",
+								"credentials",
+								"{{credential_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Files",
+			"item": [
+				{
+					"name": "Upload File",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "dumapod_id",
+									"value": "{{pod_id}}",
+									"type": "text"
+								},
+								{
+									"key": "description",
+									"value": "Test file upload",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/files/upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"upload"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/files?page=1&page_size=20",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "page_size",
+									"value": "20"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get File Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/files/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"{{file_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/files/{{file_id}}/download",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"{{file_id}}",
+								"download"
 							]
 						}
 					},
@@ -298,6 +506,16 @@
 		},
 		{
 			"key": "pod_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "credential_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "file_id",
 			"value": "1",
 			"type": "string"
 		}

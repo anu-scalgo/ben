@@ -58,6 +58,23 @@ class StorageRepository:
             
         return self.buckets[provider]
 
+    async def check_connectivity(self, provider: str, credentials: Optional[object] = None) -> bool:
+        """
+        Check connectivity to storage provider.
+        """
+        try:
+            client = await self._get_client(provider, credentials)
+            bucket = await self._get_bucket(provider, credentials)
+            # Perform a lightweight operation to verify access, e.g., head_bucket or list_objects(max_keys=1)
+            # head_bucket is strict on permissions, list might be better or head.
+            # boto3 head_bucket: 
+            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/head_bucket.html
+            client.head_bucket(Bucket=bucket)
+            return True
+        except Exception as e:
+            # Log error?
+            return False
+
     async def upload_file(
         self, file_content: bytes, key: str, content_type: str, provider: Optional[str] = None, credentials: Optional[object] = None
     ) -> str:

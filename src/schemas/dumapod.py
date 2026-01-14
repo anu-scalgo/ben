@@ -43,6 +43,10 @@ class DumaPodUpdate(BaseModel):
     enable_wasabi: Optional[bool] = None
     enable_oracle_os: Optional[bool] = None
     
+    use_custom_s3: Optional[bool] = None
+    use_custom_wasabi: Optional[bool] = None
+    use_custom_oracle: Optional[bool] = None
+    
     primary_storage: Optional[StorageProvider] = None
     secondary_storage: Optional[StorageProvider] = None
     

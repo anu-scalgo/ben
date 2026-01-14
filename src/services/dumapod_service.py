@@ -76,13 +76,38 @@ class DumaPodService:
 
     async def update_dumapod(self, pod_id: int, pod_data: DumaPodUpdate) -> DumaPod:
         """Update DumaPod."""
-        # Need to fetch existing to merge with updates for validation if partial updates affect validity
-        # For simplicity, if changing providers/enables, we re-validate.
-        # Since logic is complex with partial updates, we roughly validte present fields.
-        # But rigorous validation requires checking current state + delta.
-        # Skipping simplified for now.
-        
+        # Check if enabling custom credentials
+        if pod_data.use_custom_s3 is True:
+            await self._validate_credential_connectivity(pod_id, StorageProvider.AWS_S3)
+        if pod_data.use_custom_wasabi is True:
+            await self._validate_credential_connectivity(pod_id, StorageProvider.WASABI)
+        if pod_data.use_custom_oracle is True:
+            await self._validate_credential_connectivity(pod_id, StorageProvider.ORACLE_OS)
+
         return await self.repo.update(pod_id, **pod_data.model_dump(exclude_unset=True))
+
+    async def _validate_credential_connectivity(self, pod_id: int, provider: StorageProvider):
+        """Helper to validate credential connectivity."""
+        from ..repositories.credential_repo import CredentialRepository
+        from ..repositories.storage_repo import StorageRepository
+        
+        cred_repo = CredentialRepository(self.db)
+        credential = await cred_repo.get_by_dumapod_and_provider(pod_id, provider)
+        
+        if not credential:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot enable custom {provider}: No custom credentials found."
+            )
+            
+        storage_repo = StorageRepository()
+        is_connected = await storage_repo.check_connectivity(provider, credential)
+        
+        if not is_connected:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot enable custom {provider}: Connectivity check failed. Please check your credentials."
+            )
 
     async def delete_dumapod(self, pod_id: int) -> bool:
         """Delete DumaPod."""

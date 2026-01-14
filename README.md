@@ -63,6 +63,18 @@ The guide covers:
 4.  **Start server**: `poetry run uvicorn src.main:app --reload`
 
 ### Development (Legacy/Manual)
+## Storage Features
+
+- **Multi-Provider Support**: AWS S3, Wasabi, and Oracle Object Storage.
+- **Dynamic Provider Selection**: Configure primary and secondary storage providers per DumaPod.
+- **Custom Credentials**:
+    - Supports per-Pod custom storage credentials (e.g., specific S3 buckets/keys for a client).
+    - Toggle between system default credentials and custom credentials using `use_custom_s3`, `use_custom_wasabi`, `use_custom_oracle` flags.
+    - Secure credential management via API.
+- **Credential Validation**:
+    - Automatically validates connectivity when enabling custom credentials.
+    - Prevents enabling `use_custom_*` flags if the associated credentials are invalid or missing.
+- **Direct Uploads**: (Planned) Presigned URLs for direct client-to-storage uploads.
 
 Start the FastAPI server with auto-reload:
 ```bash
@@ -213,7 +225,7 @@ Key environment variables (see `.env.example` for full list):
 - `POST /plans/subscribe` - Subscribe to a plan
 
 ### Files
-- `POST /files/upload` - Upload file (supports streaming)
+- `POST /files/upload` - Upload file to a specific DumaPod (requires `dumapod_id`)
 - `GET /files` - List user's files
 - `GET /files/{file_id}` - Get file details
 - `GET /files/{file_id}/download` - Download file

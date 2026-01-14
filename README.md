@@ -6,6 +6,7 @@ FastAPI backend for Dumacle with async I/O, video transcoding, and multi-storage
 
 - **Async-First Architecture**: Built with FastAPI for high-performance async I/O operations
 - **User Management**: Role-Based Access Control (RBAC) with Superadmin, Admin, and Enduser roles
+- **Duma Pods**: Multi-storage plans (S3, Wasabi, Oracle) with capacity management
 - **Type Safety**: Pydantic v2 for schema validation and auto-generated OpenAPI docs
 - **Multi-Storage Support**: S3, Oracle Cloud Storage, and Wasabi integration
 - **Video Transcoding**: FFmpeg-based transcoding with Celery background workers
@@ -197,6 +198,14 @@ Key environment variables (see `.env.example` for full list):
 - `GET /users/me` - Get current user profile
 - `GET /users/{user_id}` - Get specific user details
 - `PATCH /users/{user_id}` - Update user details
+
+### Duma Pods (Storage Plans)
+- `POST /dumapods` - Create a new storage pod (Admin/Superadmin)
+- `GET /dumapods` - List all pods (Admin/Superadmin)
+- `GET /dumapods/{pod_id}` - Get pod details
+- `PATCH /dumapods/{pod_id}` - Update pod
+- `DELETE /dumapods/{pod_id}` - Soft delete pod
+
 
 
 ### Plans

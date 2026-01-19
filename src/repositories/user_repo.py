@@ -1,54 +1,60 @@
 """User repository for user data access."""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from .base import BaseRepository
-
-# Note: In a real implementation, you would import the actual User model
-# from ..models.user import User
-# For now, we'll use a placeholder structure
+from ..models.user import User, UserRole
 
 
 class UserRepository(BaseRepository):
     """Repository for user operations."""
 
     def __init__(self, session: AsyncSession):
-        # In real implementation: super().__init__(session, User)
-        self.session = session
+        super().__init__(session, User)
 
-    async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+    async def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email address."""
-        # Placeholder implementation
-        # In real implementation:
-        # result = await self.session.execute(
-        #     select(User).where(User.email == email)
-        # )
-        # user = result.scalar_one_or_none()
-        # return self._to_dict(user) if user else None
-        return None
+        stmt = select(User).where(User.email == email)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def create_user(
-        self, email: str, hashed_password: str, full_name: str
-    ) -> Dict[str, Any]:
+        self,
+        email: str,
+        hashed_password: str,
+        full_name: str,
+        role: UserRole = UserRole.ENDUSER,
+    ) -> User:
         """Create a new user."""
-        # Placeholder implementation
-        # In real implementation:
-        # return await self.create(
-        #     email=email,
-        #     hashed_password=hashed_password,
-        #     full_name=full_name,
-        #     is_active=True,
-        # )
-        return {
-            "id": 1,
-            "email": email,
-            "full_name": full_name,
-            "is_active": True,
-        }
+        user = User(
+            email=email,
+            hashed_password=hashed_password,
+            full_name=full_name,
+            role=role,
+            is_active=True,
+        )
+        self.session.add(user)
+        result = await self.session.commit()
+        return user
 
-    async def get_by_id(self, id: int) -> Optional[Dict[str, Any]]:
+    async def get_by_id(self, id: int) -> Optional[User]:
         """Get user by ID."""
-        # Placeholder implementation
-        return {"id": id, "email": "user@example.com", "full_name": "Test User"}
+        stmt = select(User).where(User.id == id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_user(self, user: User, data: Dict[str, Any]) -> User:
+        """Update user attributes."""
+        for key, value in data.items():
+            setattr(user, key, value)
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
+    async def get_all_users(self, skip: int = 0, limit: int = 100) -> List[User]:
+        """Get all users."""
+        stmt = select(User).offset(skip).limit(limit)
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
 

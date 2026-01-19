@@ -35,6 +35,12 @@ class FileResponse(BaseModel):
         default_factory=list, description="URLs to transcoded versions"
     )
     upload_status: str = Field(default="pending", description="pending, processing, completed, failed")
+    upload_progress: int = Field(default=0, description="Upload progress percentage (0-100)")
+    
+    s3_url: Optional[str] = None
+    wasabi_url: Optional[str] = None
+    oracle_url: Optional[str] = None
+    
     created_at: datetime
     updated_at: datetime
 

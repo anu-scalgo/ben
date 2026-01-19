@@ -5,6 +5,8 @@ FastAPI backend for Dumacle with async I/O, video transcoding, and multi-storage
 ## Features
 
 - **Async-First Architecture**: Built with FastAPI for high-performance async I/O operations
+- **User Management**: Role-Based Access Control (RBAC) with Superadmin, Admin, and Enduser roles
+- **Duma Pods**: Multi-storage plans (S3, Wasabi, Oracle) with capacity management
 - **Type Safety**: Pydantic v2 for schema validation and auto-generated OpenAPI docs
 - **Multi-Storage Support**: S3, Oracle Cloud Storage, and Wasabi integration
 - **Video Transcoding**: FFmpeg-based transcoding with Celery background workers
@@ -46,10 +48,13 @@ dumacle-backend/
 
 For detailed installation and configuration instructions, please refer to the **[Installation Guide](INSTALLATION.md)**.
 
-The guide covers:
+For production deployment to a Linux server, see the **[Deployment Guide](DEPLOYMENT.md)**.
+
+The guides cover:
 - System Prerequisites
 - Local Development Setup (PostgreSQL + Poetry)
 - Docker Setup
+- Production Deployment (Linux Server)
 - Environment Variables
 - Troubleshooting
 
@@ -58,9 +63,22 @@ The guide covers:
 1.  **Install dependencies**: `poetry install`
 2.  **Configure environment**: `cp .env.example .env` (ensure PostgreSQL URL)
 3.  **Run migrations**: `poetry run alembic upgrade head`
-4.  **Start server**: `poetry run uvicorn src.main:app --reload`
+4.  **Seed database**: `python scripts/seed.py` (creates default superadmin: `admin@example.com` / `admin123456`)
+5.  **Start server**: `poetry run uvicorn src.main:app --reload`
 
 ### Development (Legacy/Manual)
+## Storage Features
+
+- **Multi-Provider Support**: AWS S3, Wasabi, and Oracle Object Storage.
+- **Dynamic Provider Selection**: Configure primary and secondary storage providers per DumaPod.
+- **Custom Credentials**:
+    - Supports per-Pod custom storage credentials (e.g., specific S3 buckets/keys for a client).
+    - Toggle between system default credentials and custom credentials using `use_custom_s3`, `use_custom_wasabi`, `use_custom_oracle` flags.
+    - Secure credential management via API.
+- **Credential Validation**:
+    - Automatically validates connectivity when enabling custom credentials.
+    - Prevents enabling `use_custom_*` flags if the associated credentials are invalid or missing.
+- **Direct Uploads**: (Planned) Presigned URLs for direct client-to-storage uploads.
 
 Start the FastAPI server with auto-reload:
 ```bash
@@ -180,6 +198,7 @@ Key environment variables (see `.env.example` for full list):
 - `REDIS_URL`: Redis connection string
 - `STRIPE_SECRET_KEY`: Stripe API secret key
 - `JWT_SECRET_KEY`: Secret for JWT token generation
+- `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`: JWT token expiration time in minutes (default: 1440 = 24 hours)
 - `STORAGE_PROVIDER`: Storage backend (s3, oracle, wasabi)
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`: AWS credentials
 - `MAX_FILE_SIZE_MB`: Maximum upload size in MB
@@ -190,14 +209,30 @@ Key environment variables (see `.env.example` for full list):
 - `POST /auth/register` - Register new user
 - `POST /auth/login` - Login and get JWT token
 
+### Users
+- `POST /users` - Create a new user (Admin/Superadmin only)
+- `GET /users` - List all users (Admin/Superadmin only)
+- `GET /users/me` - Get current user profile
+- `GET /users/{user_id}` - Get specific user details
+- `PATCH /users/{user_id}` - Update user details
+
+### Duma Pods (Storage Plans)
+- `POST /dumapods` - Create a new storage pod (Admin/Superadmin)
+- `GET /dumapods` - List all pods (Admin/Superadmin)
+- `GET /dumapods/{pod_id}` - Get pod details
+- `PATCH /dumapods/{pod_id}` - Update pod
+- `DELETE /dumapods/{pod_id}` - Soft delete pod
+
+
+
 ### Plans
 - `GET /plans` - List available subscription plans
 - `POST /plans/subscribe` - Subscribe to a plan
 
 ### Files
-- `POST /files/upload` - Upload file (supports streaming)
-- `GET /files` - List user's files
-- `GET /files/{file_id}` - Get file details
+- `POST /files/upload` - Upload file to a specific DumaPod (requires `dumapod_id`)
+- `GET /files` - List user's files (includes `upload_status` and `upload_progress`)
+- `GET /files/{file_id}` - Get file details (polling this endpoint returns real-time `upload_progress` 0-100)
 - `GET /files/{file_id}/download` - Download file
 
 ### Webhooks

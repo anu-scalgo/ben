@@ -14,10 +14,12 @@ from ..schemas.auth import TokenData
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
+from ..models.user import User
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> User:
     """
     Dependency to get current authenticated user from JWT token.
     Raises HTTPException if token is invalid or user not found.
@@ -68,4 +70,24 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
     )
     return encoded_jwt
+
+
+def check_admin_privileges(user: User):
+    """Check if user has admin privileges."""
+    from ..models.user import UserRole  # specific import to avoid circular dependency
+    if user.role not in [UserRole.SUPERADMIN, UserRole.ADMIN]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough privileges",
+        )
+
+
+def check_superadmin_privileges(user: User):
+    """Check if user has superadmin privileges."""
+    from ..models.user import UserRole
+    if user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough privileges",
+        )
 

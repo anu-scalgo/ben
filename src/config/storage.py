@@ -7,14 +7,17 @@ from typing import Optional
 from .settings import settings
 
 
-def get_storage_client() -> BaseClient:
+def get_storage_client(provider: Optional[str] = None) -> BaseClient:
     """
     Get storage client based on configured provider.
     Returns boto3 client configured for the selected storage provider.
     """
-    provider = settings.storage_provider.lower()
+    if not provider:
+        provider = settings.storage_provider
+    
+    provider = provider.lower()
 
-    if provider == "s3":
+    if provider == "s3" or provider == "aws_s3":
         return boto3.client(
             "s3",
             aws_access_key_id=settings.aws_access_key_id,
@@ -23,7 +26,7 @@ def get_storage_client() -> BaseClient:
             config=Config(signature_version="s3v4"),
         )
 
-    elif provider == "oracle":
+    elif provider == "oracle" or provider == "oracle_object_storage":
         # Oracle Cloud Storage uses S3-compatible API
         return boto3.client(
             "s3",
@@ -47,13 +50,16 @@ def get_storage_client() -> BaseClient:
         raise ValueError(f"Unsupported storage provider: {provider}")
 
 
-def get_bucket_name() -> str:
+def get_bucket_name(provider: Optional[str] = None) -> str:
     """Get bucket name for the configured storage provider."""
-    provider = settings.storage_provider.lower()
+    if not provider:
+        provider = settings.storage_provider
+    
+    provider = provider.lower()
 
-    if provider == "s3":
+    if provider == "s3" or provider == "aws_s3":
         return settings.s3_bucket_name
-    elif provider == "oracle":
+    elif provider == "oracle" or provider == "oracle_object_storage":
         return settings.oracle_bucket_name
     elif provider == "wasabi":
         return settings.wasabi_bucket_name

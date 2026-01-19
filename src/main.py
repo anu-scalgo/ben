@@ -12,7 +12,7 @@ from .config import settings
 from .config.database import init_db, close_db
 from .config.redis import close_redis
 from .middleware.rate_limit import limiter
-from .routers import auth, plans, files, webhooks
+from .routers import auth, plans, files, webhooks, users, dumapods, credentials
 from .utils.logger import configure_logging, get_logger
 
 # Configure logging
@@ -79,7 +79,10 @@ async def health_check():
 app.include_router(auth.router)
 app.include_router(plans.router)
 app.include_router(files.router)
+app.include_router(credentials.router)
 app.include_router(webhooks.router)
+app.include_router(users.router)
+app.include_router(dumapods.router)
 
 
 # Root endpoint

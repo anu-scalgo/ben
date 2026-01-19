@@ -1,5 +1,6 @@
 """Storage repository for multi-provider storage operations."""
 
+import asyncio
 from typing import Optional
 import boto3
 from botocore.client import BaseClient
@@ -76,7 +77,13 @@ class StorageRepository:
             return False
 
     async def upload_file(
-        self, file_content: bytes, key: str, content_type: str, provider: Optional[str] = None, credentials: Optional[object] = None
+        self, 
+        file_content: bytes, 
+        key: str, 
+        content_type: str, 
+        provider: Optional[str] = None, 
+        credentials: Optional[object] = None,
+        progress_callback: Optional[callable] = None
     ) -> str:
         """
         Upload file to storage.
@@ -84,12 +91,24 @@ class StorageRepository:
         client = await self._get_client(provider, credentials)
         bucket = await self._get_bucket(provider, credentials)
         
-        client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=file_content,
-            ContentType=content_type,
-        )
+        loop = asyncio.get_running_loop()
+        
+        # Create a file-like object from bytes
+        import io
+        # Create a file-like object from bytes
+        import io
+        file_obj = io.BytesIO(file_content)
+        
+        def _upload():
+            client.upload_fileobj(
+                Fileobj=file_obj,
+                Bucket=bucket,
+                Key=key,
+                ExtraArgs={'ContentType': content_type},
+                Callback=progress_callback
+            )
+            
+        await loop.run_in_executor(None, _upload)
         return key
 
     async def generate_presigned_url(

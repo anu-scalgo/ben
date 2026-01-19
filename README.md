@@ -60,7 +60,8 @@ The guide covers:
 1.  **Install dependencies**: `poetry install`
 2.  **Configure environment**: `cp .env.example .env` (ensure PostgreSQL URL)
 3.  **Run migrations**: `poetry run alembic upgrade head`
-4.  **Start server**: `poetry run uvicorn src.main:app --reload`
+4.  **Seed database**: `python scripts/seed.py` (creates default superadmin: `admin@example.com` / `admin123456`)
+5.  **Start server**: `poetry run uvicorn src.main:app --reload`
 
 ### Development (Legacy/Manual)
 ## Storage Features
@@ -194,6 +195,7 @@ Key environment variables (see `.env.example` for full list):
 - `REDIS_URL`: Redis connection string
 - `STRIPE_SECRET_KEY`: Stripe API secret key
 - `JWT_SECRET_KEY`: Secret for JWT token generation
+- `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`: JWT token expiration time in minutes (default: 1440 = 24 hours)
 - `STORAGE_PROVIDER`: Storage backend (s3, oracle, wasabi)
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`: AWS credentials
 - `MAX_FILE_SIZE_MB`: Maximum upload size in MB
@@ -226,8 +228,8 @@ Key environment variables (see `.env.example` for full list):
 
 ### Files
 - `POST /files/upload` - Upload file to a specific DumaPod (requires `dumapod_id`)
-- `GET /files` - List user's files
-- `GET /files/{file_id}` - Get file details
+- `GET /files` - List user's files (includes `upload_status` and `upload_progress`)
+- `GET /files/{file_id}` - Get file details (polling this endpoint returns real-time `upload_progress` 0-100)
 - `GET /files/{file_id}/download` - Download file
 
 ### Webhooks

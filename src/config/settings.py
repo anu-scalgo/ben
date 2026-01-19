@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     jwt_access_token_expire_minutes: int = Field(
-        default=30, alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES"
+        default=1440, alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES"
     )
 
     # CORS (stored as string, parsed via property)

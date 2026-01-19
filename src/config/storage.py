@@ -17,7 +17,7 @@ def get_storage_client(provider: Optional[str] = None) -> BaseClient:
     
     provider = provider.lower()
 
-    if provider == "s3":
+    if provider == "s3" or provider == "aws_s3":
         return boto3.client(
             "s3",
             aws_access_key_id=settings.aws_access_key_id,
@@ -26,7 +26,7 @@ def get_storage_client(provider: Optional[str] = None) -> BaseClient:
             config=Config(signature_version="s3v4"),
         )
 
-    elif provider == "oracle":
+    elif provider == "oracle" or provider == "oracle_object_storage":
         # Oracle Cloud Storage uses S3-compatible API
         return boto3.client(
             "s3",
@@ -57,9 +57,9 @@ def get_bucket_name(provider: Optional[str] = None) -> str:
     
     provider = provider.lower()
 
-    if provider == "s3":
+    if provider == "s3" or provider == "aws_s3":
         return settings.s3_bucket_name
-    elif provider == "oracle":
+    elif provider == "oracle" or provider == "oracle_object_storage":
         return settings.oracle_bucket_name
     elif provider == "wasabi":
         return settings.wasabi_bucket_name

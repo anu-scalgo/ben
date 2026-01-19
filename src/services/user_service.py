@@ -88,17 +88,10 @@ class UserService:
             pods_usage = []
             for pod in user.created_dumapods:
                 used_bytes = await self.file_repo.get_total_usage(pod.id)
-                used_gb = bytes_to_gb(float(used_bytes) if used_bytes else 0.0)
-                file_count = await self.file_repo.get_file_count(pod.id) # Need to implement/verify this
+                used_gb = round(bytes_to_gb(float(used_bytes) if used_bytes else 0.0), 4)
+                file_count = await self.file_repo.get_file_count(pod.id)
                 
-                # Check if get_file_count supports pod_id filter. 
-                # Currently get_total_usage supports pod_id.
-                # get_file_count_by_user supports user_id.
-                # We need get_file_count_by_pod or similar.
-                # Let's check repository again.
-                # For now assuming we add it or use count.
-                
-                balance_gb = float(pod.storage_capacity_gb) - used_gb
+                balance_gb = round(float(pod.storage_capacity_gb) - used_gb, 4)
                 
                 pods_usage.append(UserPodUsage(
                     pod_id=pod.id,

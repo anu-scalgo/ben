@@ -42,18 +42,20 @@ class DumaStoredFileRepository(BaseRepository):
         return file_record
 
     async def get_total_usage(self, dumapod_id: int) -> int:
-        """Get total storage usage for a DumaPod in bytes."""
+        """Get total storage usage for a DumaPod in bytes (excluding failed uploads)."""
         stmt = select(func.sum(DumaStoredFile.file_size)).where(
-            DumaStoredFile.dumapod_id == dumapod_id
+            DumaStoredFile.dumapod_id == dumapod_id,
+            DumaStoredFile.upload_status != "failed"
         )
         result = await self.session.execute(stmt)
         total_size = result.scalar()
         return total_size or 0
 
     async def get_file_count(self, dumapod_id: int) -> int:
-        """Get total file count for a DumaPod."""
+        """Get total file count for a DumaPod (excluding failed uploads)."""
         stmt = select(func.count()).select_from(DumaStoredFile).where(
-            DumaStoredFile.dumapod_id == dumapod_id
+            DumaStoredFile.dumapod_id == dumapod_id,
+            DumaStoredFile.upload_status != "failed"
         )
         result = await self.session.execute(stmt)
         return result.scalar() or 0

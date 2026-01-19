@@ -33,22 +33,41 @@ async def upload_file(
     Supports streaming uploads for large files.
     Automatically enqueues transcoding for video files.
     """
-    file_service = FileService(db)
-    response = await file_service.stage_upload(
-        user_id=user.id, dumapod_id=dumapod_id, file=file, description=description
-    )
-    
-    from ..services.file_service import run_background_upload_wrapper
-    
-    background_tasks.add_task(
-        run_background_upload_wrapper,
-        file_id=response.id,
-        temp_path=response.storage_key,
-        dumapod_id=dumapod_id,
-        user_id=user.id
-    )
-    
-    return response
+    try:
+        file_service = FileService(db)
+        response = await file_service.stage_upload(
+            user_id=user.id, dumapod_id=dumapod_id, file=file, description=description
+        )
+        
+        from ..services.file_service import run_background_upload_wrapper
+        
+        background_tasks.add_task(
+            run_background_upload_wrapper,
+            file_id=response.id,
+            temp_path=response.storage_key,
+            dumapod_id=dumapod_id,
+            user_id=user.id
+        )
+        
+        return response
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors, etc.)
+        raise
+    except Exception as e:
+        # Log the error with context and re-raise
+        from ..utils.logger import get_logger
+        logger = get_logger(__name__)
+        logger.error(
+            f"File upload failed for user {user.id}, dumapod {dumapod_id}",
+            exc_info=e,
+            extra={
+                "user_id": user.id,
+                "dumapod_id": dumapod_id,
+                "filename": file.filename,
+                "content_type": file.content_type,
+            }
+        )
+        raise
 
 
 @router.get("", response_model=FileListResponse)

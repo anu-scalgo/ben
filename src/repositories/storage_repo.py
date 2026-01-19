@@ -1,5 +1,6 @@
 """Storage repository for multi-provider storage operations."""
 
+import asyncio
 from typing import Optional
 import boto3
 from botocore.client import BaseClient
@@ -84,12 +85,17 @@ class StorageRepository:
         client = await self._get_client(provider, credentials)
         bucket = await self._get_bucket(provider, credentials)
         
-        client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=file_content,
-            ContentType=content_type,
-        )
+        loop = asyncio.get_running_loop()
+        
+        def _upload():
+            client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=file_content,
+                ContentType=content_type,
+            )
+            
+        await loop.run_in_executor(None, _upload)
         return key
 
     async def generate_presigned_url(

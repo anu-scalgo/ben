@@ -118,9 +118,10 @@ class FileService:
         sanitized_filename = sanitize_filename(file.filename or "unnamed")
         storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
         
+        import asyncio
         upload_urls = {}
         
-        for p_config in providers_to_upload:
+        async def _upload_and_get_url(p_config):
             p_type = p_config["provider"]
             creds = p_config["credentials"]
             
@@ -133,26 +134,18 @@ class FileService:
                 credentials=creds
             )
             
-            # Generate URL (Presigned for download, or just key/location reference?)
-            # Requirement says "save that return file links". 
-            # Ideally we save the Key, but if we need a link, maybe a permanent public link or just the key?
-            # "file link from that services will saved" -> implies URL.
-            # But S3 private buckets have expiring URLs. 
-            # For now, let's store the Key or try to generate a long-lived URL if possible, 
-            # OR simply store the Storage Key and generate URLs on read.
-            # However, logic explicitly asks to SAVE file links. 
-            # I will generate specific URLs for now, possibly presigned with long duration or public URL structure.
-            # Given typical restrictions, storing the KEY + Provider is best practice, but adhering to prompt:
-            # "receive the response of the storage services and the file link from that services will saved"
-            # I'll store the object URL (e.g. s3://bucket/key or https://bucket.s3.region.amazonaws.com/key).
-            
-            # Let's construct a standard HTTP URL for reference if possible, or just the S3 URI.
+            # Generate URL
             bucket_name = creds.bucket_name if creds else await self.storage_repo._get_bucket(p_type)
-            # Simple construction for now, ideally repo has a method `get_object_url`.
-            # I'll rely on a new helper or simple string formatting.
-            
             p_value = p_type.value if hasattr(p_type, 'value') else p_type
-            url = f"{p_value}://{bucket_name}/{storage_key}" # Placeholder URI format
+            url = f"{p_value}://{bucket_name}/{storage_key}"
+            
+            return p_type, url
+
+        # Execute all uploads in parallel
+        upload_tasks = [_upload_and_get_url(conf) for conf in providers_to_upload]
+        results = await asyncio.gather(*upload_tasks)
+        
+        for p_type, url in results:
             if p_type == StorageProvider.AWS_S3:
                 upload_urls["s3_url"] = url
             elif p_type == StorageProvider.WASABI:

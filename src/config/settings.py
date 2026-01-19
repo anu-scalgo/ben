@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
 
     # File Upload
-    max_file_size_mb: int = Field(default=100, alias="MAX_FILE_SIZE_MB")
+    max_file_size_mb: int = Field(default=2048, alias="MAX_FILE_SIZE_MB")
     allowed_file_types_str: str = Field(
         default="video/mp4,video/avi,video/mov,video/mkv,application/pdf,image/jpeg,image/png",
         alias="ALLOWED_FILE_TYPES",

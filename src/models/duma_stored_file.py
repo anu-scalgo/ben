@@ -22,6 +22,8 @@ class DumaStoredFile(Base):
     file_name: Mapped[str] = mapped_column(String, nullable=False)
     file_type: Mapped[str] = mapped_column(String, nullable=False)  # content_type
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    upload_status: Mapped[str] = mapped_column(String, default="pending", nullable=True)
+    upload_progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     
     # Store URLs/Links for each provider
     s3_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)

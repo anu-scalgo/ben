@@ -77,7 +77,13 @@ class StorageRepository:
             return False
 
     async def upload_file(
-        self, file_content: bytes, key: str, content_type: str, provider: Optional[str] = None, credentials: Optional[object] = None
+        self, 
+        file_content: bytes, 
+        key: str, 
+        content_type: str, 
+        provider: Optional[str] = None, 
+        credentials: Optional[object] = None,
+        progress_callback: Optional[callable] = None
     ) -> str:
         """
         Upload file to storage.
@@ -87,12 +93,19 @@ class StorageRepository:
         
         loop = asyncio.get_running_loop()
         
+        # Create a file-like object from bytes
+        import io
+        # Create a file-like object from bytes
+        import io
+        file_obj = io.BytesIO(file_content)
+        
         def _upload():
-            client.put_object(
+            client.upload_fileobj(
+                Fileobj=file_obj,
                 Bucket=bucket,
                 Key=key,
-                Body=file_content,
-                ContentType=content_type,
+                ExtraArgs={'ContentType': content_type},
+                Callback=progress_callback
             )
             
         await loop.run_in_executor(None, _upload)

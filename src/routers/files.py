@@ -12,13 +12,16 @@ from ..middleware.quota import check_quota
 from ..middleware.rate_limit import limiter
 from fastapi import Request
 
+from fastapi import BackgroundTasks
+
 router = APIRouter(prefix="/files", tags=["files"])
 
 
-@router.post("/upload", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/upload", response_model=FileResponse, status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("20/minute")
 async def upload_file(
     request: Request,
+    background_tasks: BackgroundTasks,
     dumapod_id: int = Form(...),
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
@@ -31,9 +34,21 @@ async def upload_file(
     Automatically enqueues transcoding for video files.
     """
     file_service = FileService(db)
-    return await file_service.handle_upload(
+    response = await file_service.stage_upload(
         user_id=user.id, dumapod_id=dumapod_id, file=file, description=description
     )
+    
+    from ..services.file_service import run_background_upload_wrapper
+    
+    background_tasks.add_task(
+        run_background_upload_wrapper,
+        file_id=response.id,
+        temp_path=response.storage_key,
+        dumapod_id=dumapod_id,
+        user_id=user.id
+    )
+    
+    return response
 
 
 @router.get("", response_model=FileListResponse)

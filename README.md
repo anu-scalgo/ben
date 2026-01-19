@@ -48,10 +48,13 @@ dumacle-backend/
 
 For detailed installation and configuration instructions, please refer to the **[Installation Guide](INSTALLATION.md)**.
 
-The guide covers:
+For production deployment to a Linux server, see the **[Deployment Guide](DEPLOYMENT.md)**.
+
+The guides cover:
 - System Prerequisites
 - Local Development Setup (PostgreSQL + Poetry)
 - Docker Setup
+- Production Deployment (Linux Server)
 - Environment Variables
 - Troubleshooting
 

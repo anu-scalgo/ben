@@ -50,6 +50,14 @@ class DumaStoredFileRepository(BaseRepository):
         total_size = result.scalar()
         return total_size or 0
 
+    async def get_file_count(self, dumapod_id: int) -> int:
+        """Get total file count for a DumaPod."""
+        stmt = select(func.count()).select_from(DumaStoredFile).where(
+            DumaStoredFile.dumapod_id == dumapod_id
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+
     async def get_file(self, file_id: int) -> Optional[DumaStoredFile]:
         """Get file by ID."""
         stmt = select(DumaStoredFile).where(DumaStoredFile.id == file_id)

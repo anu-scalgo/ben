@@ -226,8 +226,8 @@ Key environment variables (see `.env.example` for full list):
 
 ### Files
 - `POST /files/upload` - Upload file to a specific DumaPod (requires `dumapod_id`)
-- `GET /files` - List user's files
-- `GET /files/{file_id}` - Get file details
+- `GET /files` - List user's files (includes `upload_status` and `upload_progress`)
+- `GET /files/{file_id}` - Get file details (polling this endpoint returns real-time `upload_progress` 0-100)
 - `GET /files/{file_id}/download` - Download file
 
 ### Webhooks

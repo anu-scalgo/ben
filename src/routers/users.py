@@ -1,11 +1,11 @@
 """User management router."""
 
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..config.database import get_db
 from ..services.user_service import UserService
-from ..schemas.user import UserCreate, UserUpdate
+from ..schemas.user import UserCreate, UserUpdate, UserWithUsageResponse
 from ..schemas.auth import UserResponse
 from ..middleware.auth import get_current_user, check_admin_privileges, check_superadmin_privileges
 from ..models.user import User, UserRole
@@ -27,6 +27,25 @@ async def list_users(
     check_admin_privileges(current_user)
     user_service = UserService(db)
     return await user_service.get_users(skip=skip, limit=limit)
+
+
+@router.get("/usage", response_model=List[UserWithUsageResponse])
+async def list_users_usage(
+    request: Request,
+    skip: int = 0,
+    limit: int = 100,
+    user_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all users with their DumaPod usage details (Admin only).
+    Includes pod capacity, used storage, balance, and file count.
+    Optional: Filter by user_id.
+    """
+    check_admin_privileges(current_user)
+    user_service = UserService(db)
+    return await user_service.get_users_with_usage(skip=skip, limit=limit, user_id=user_id)
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

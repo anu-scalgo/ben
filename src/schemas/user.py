@@ -29,3 +29,30 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     role: Optional[UserRole] = None
     password: Optional[str] = Field(None, min_length=8)
+
+
+class UserPodUsage(BaseModel):
+    """Schema for DumaPod usage statistics."""
+    
+    pod_id: int
+    pod_name: str
+    storage_capacity_gb: float
+    used_storage_gb: float
+    balance_storage_gb: float
+    file_count: int
+
+
+class UserWithUsageResponse(BaseModel):
+    """User response with aggregated usage details."""
+    
+    id: int
+    email: str
+    full_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    
+    pods: list[UserPodUsage] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True

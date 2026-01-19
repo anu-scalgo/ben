@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # File Upload
     max_file_size_mb: int = Field(default=2048, alias="MAX_FILE_SIZE_MB")
     allowed_file_types_str: str = Field(
-        default="video/mp4,video/avi,video/mov,video/mkv,application/pdf,image/jpeg,image/png",
+        default="video/mp4,video/quicktime,video/x-msvideo,video/x-ms-wmv,video/webm,audio/mpeg,audio/wav,application/pdf",
         alias="ALLOWED_FILE_TYPES",
         exclude=True,  # Don't include in model dump
     )

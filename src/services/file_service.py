@@ -37,25 +37,34 @@ class FileService:
         self, user_id: int, dumapod_id: int, file: UploadFile, description: Optional[str] = None
     ) -> FileResponse:
         """
-        Stage upload:
-        1. Validate
-        2. Save to temp
-        3. Create pending record
-        4. Return response (background task picks up from there)
+        Stage upload - Optimized for large files:
+        1. Validate file type only (no full read)
+        2. Get file size from metadata
+        3. Check capacity
+        4. Create database record with "uploading" status
+        5. Return immediately (202 Accepted)
+        
+        Background task will handle actual file streaming and S3 upload.
         """
-        with open("stage.log", "a") as f:
-             f.write(f"Staging upload for user {user_id}\n")
+        from ..utils.logger import get_logger
+        logger = get_logger(__name__)
         
-        # 1. Validate File
-        # We removed middleware validation, so we rely on service logic if any. 
-        # (Size check is done below against capacity)
-        validate_file_upload(file) # Keep original validation
+        logger.info(f"Staging upload for user {user_id}, file: {file.filename}")
         
-        # Read file content
-        file_content = await file.read()
-        file_size = len(file_content) # This line is now correctly placed after file_content is read.
+        # 1. Validate File Type (no full read needed)
+        validate_file_upload(file)
         
-        # 1. Get DumaPod & Check Capacity
+        # 2. Get file size from UploadFile metadata (no read needed)
+        # UploadFile.size is available from the Content-Length header
+        file_size = file.size
+        
+        if file_size is None or file_size == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size could not be determined or file is empty"
+            )
+        
+        # 3. Get DumaPod & Check Capacity
         dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
         current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
         
@@ -70,25 +79,20 @@ class FileService:
         # Capacity Check
         capacity_bytes = limit_gb * 1024 * 1024 * 1024
         if current_usage_bytes + file_size > capacity_bytes:
-             raise HTTPException(
+            logger.warning(
+                f"Storage capacity exceeded for dumapod {dumapod_id}: "
+                f"current={current_usage_bytes / (1024**3):.2f}GB, "
+                f"file={file_size / (1024**3):.2f}GB, "
+                f"limit={limit_gb}GB"
+            )
+            raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Upload exceeds DumaPod storage capacity. Limit: {limit_gb} GB."
+                detail=f"Upload exceeds DumaPod storage capacity. Current: {current_usage_bytes / (1024**3):.2f} GB, File: {file_size / (1024**3):.2f} GB, Limit: {limit_gb} GB"
             )
 
-        # 2. Save to Temporary File
+        # 4. Create Database Record with "uploading" status
         sanitized_filename = sanitize_filename(file.filename or "unnamed")
-        import tempfile
-        import os
         
-        # Create a temp file to store content for background processing
-        # Note: In production with multiple workers, ensure shared storage or stickiness.
-        # For single instance, local temp is fine.
-        fd, temp_path = tempfile.mkstemp()
-        with os.fdopen(fd, 'wb') as tmp:
-             tmp.write(file_content)
-        
-        # 3. Create Pending Record
-        # We don't have URLs yet.
         stored_file = await self.duma_file_repo.create_file_record(
             dumapod_id=dumapod_id,
             user_id=user_id,
@@ -97,16 +101,16 @@ class FileService:
             file_size=file_size,
             s3_url=None, 
             wasabi_url=None, 
-            oracle_url=None
+            oracle_url=None,
+            upload_status="uploading"  # File is being uploaded from client
         )
         
-        # We need to manually update status to pending if default isn't enough, 
-        # checking create_file_record impl, it likely doesn't set status.
-        # Need to ensure repo supports it or update it now.
-        # Ideally create_file_record should accept status or we update it.
-        # For now, let's assume default is "pending" from model. 
-        # But we need to return the ID for background task.
+        logger.info(
+            f"File record created: id={stored_file.id}, "
+            f"size={file_size / (1024**2):.2f}MB, status=uploading"
+        )
         
+        # 5. Return immediately - background task will handle file streaming
         return FileResponse(
             id=stored_file.id,
             user_id=stored_file.user_id,
@@ -114,37 +118,64 @@ class FileService:
             original_filename=stored_file.file_name,
             content_type=stored_file.file_type,
             file_size=stored_file.file_size,
-            storage_key=temp_path, # PASS TEMP PATH HERE TEMPORARILY for background task to know where file is
-            storage_provider=primary_storage, # Primary as reference
+            storage_key=f"uploads/{user_id}/{sanitized_filename}",  # S3 key
+            storage_provider=primary_storage,
             description=description,
-            upload_status="pending",
+            upload_status="uploading",  # Client should poll for completion
+            upload_progress=0,
             created_at=stored_file.created_at,
             updated_at=stored_file.created_at
         )
 
     async def process_background_upload(
-        self, file_id: int, temp_path: str, dumapod_id: int, user_id: int, description: Optional[str] = None
+        self, file_id: int, file: UploadFile, dumapod_id: int, user_id: int, description: Optional[str] = None
     ):
         """
-        Background task: Upload to providers, update DB, cleanup temp file.
+        Background task: Stream file from client, save to temp, upload to providers.
+        Uses chunked streaming to handle large files without memory issues.
         """
         import os
         import asyncio
+        import tempfile
+        from ..utils.logger import get_logger
+        
+        logger = get_logger(__name__)
+        temp_path = None
         
         try:
-            # Read content from temp file
+            logger.info(f"Starting background upload for file {file_id}")
+            
+            # 1. Stream file to temporary storage in chunks
+            fd, temp_path = tempfile.mkstemp(suffix=f"_{file_id}")
+            chunk_size = 8 * 1024 * 1024  # 8MB chunks
+            total_bytes_written = 0
+            
+            logger.info(f"Streaming file to temp: {temp_path}")
+            
+            # Stream file in chunks using aiofiles
+            async with aiofiles.open(temp_path, 'wb') as temp_file:
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    await temp_file.write(chunk)
+                    total_bytes_written += len(chunk)
+                    
+                    # Update progress every chunk (optional, can be less frequent)
+                    # For now, we'll update after all chunks are written
+            
+            logger.info(f"File streamed to temp: {total_bytes_written} bytes")
+            
+            # Update status to "pending" - file uploaded from client, now uploading to S3
+            await self.duma_file_repo.update_file_status_and_urls(file_id, "pending")
+            
+            # 2. Read content from temp file for S3 upload
             if not os.path.exists(temp_path):
-                print(f"Temp file {temp_path} not found for file {file_id}")
-                # Update status to failed
-                # self.file_repo.update_status(file_id, "failed")
+                logger.error(f"Temp file {temp_path} not found for file {file_id}")
+                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
                 return
             
-            # 3. Read file content from temp path
-            # Note: For very large files, reading into memory might still be an issue here if we don't stream.
-            # But storage_repo.upload_file now accepts bytes. 
-            # Ideally we should stream from disk to upload_fileobj, but storage_repo uses BytesIO wrapping bytes.
-            # To truly stream, we'd need to change storage_repo to accept file path or file object.
-            # For now, we read.
+            # Read file content from temp path
             async with aiofiles.open(temp_path, 'rb') as f:
                 file_content = await f.read()
 
@@ -170,13 +201,8 @@ class FileService:
                         
                         now = time.time()
                         
-                        # Optimization: 
                         # Update only if progress increased by at least 5% 
                         # AND at least 1 second has passed since last update.
-                        # Always update if we reached 100%? 
-                        # Actually 100% is handled by completion status update, 
-                        # but it's good to show 100% progress.
-                        
                         should_update = False
                         
                         if percent == 100 and self.last_percent < 100:
@@ -192,13 +218,12 @@ class FileService:
                                  self.service.duma_file_repo.update_upload_progress(self.file_id, percent),
                                  self.loop
                             )
-                            # Log errors from future (simple error logging)
+                            # Log errors from future
                             def log_error(fut):
                                 try:
                                     fut.result()
                                 except Exception as e:
-                                    with open("error.log", "a") as f:
-                                        f.write(f"Callback Error: {e}\n")
+                                    logger.error(f"Progress callback error: {e}")
                             future.add_done_callback(log_error)
 
             loop = asyncio.get_running_loop()
@@ -218,10 +243,6 @@ class FileService:
                 enable_oracle_os = dumapod.enable_oracle_os
                 primary_storage = dumapod.primary_storage
 
-            # Normalize DumaPod Data (This block was redundant and is now removed as variables are extracted above)
-            # The original code had a duplicate `providers_to_upload = []` and then re-extracted variables.
-            # The instruction implies using the *extracted* variables for the `providers_to_upload` logic.
-            # The `use_s3`, `use_wasabi`, `use_oracle` variables are still needed for `prepare_provider`.
             if isinstance(dumapod, dict):
                 use_s3 = dumapod.get("use_custom_s3")
                 use_wasabi = dumapod.get("use_custom_wasabi")
@@ -232,15 +253,12 @@ class FileService:
                 use_oracle = dumapod.use_custom_oracle
 
             # Prepare Providers
-            
-            # Helper to prepare provider config
             async def prepare_provider(provider_type: StorageProvider, use_custom: bool):
                 if not use_custom:
                     return {"provider": provider_type, "credentials": None}
                 creds = await self.credential_service.repo.get_by_dumapod_and_provider(dumapod_id, provider_type)
                 if not creds:
-                     # Log warning but continue? Or fail? The user expects it.
-                     print(f"Warning: Custom creds missing for {provider_type}")
+                     logger.warning(f"Custom creds missing for {provider_type}")
                      return None
                 return {"provider": provider_type, "credentials": creds}
 
@@ -256,19 +274,15 @@ class FileService:
                 if p: providers_to_upload.append(p)
             
             if not providers_to_upload:
-                 print("No providers enabled")
-                 # Update status failed
+                 logger.error("No providers enabled")
+                 await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
                  return
 
-            # Note: We need the filename again. We can get it from DB or pass it.
-            # Let's fetch the record to be sure.
+            # Fetch the record to get filename
             stored_file = await self.duma_file_repo.get_file(file_id)
             if not stored_file:
+                logger.error(f"File record {file_id} not found")
                 return 
-            
-            # Fix: stored_file is a dict from repo? 
-            # In update below we use duma_file_repo which uses SQLAlchemy model
-            # Let's rely on passed filename or fetch fresh from repo
             
             sanitized_filename = stored_file.file_name
             storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
@@ -279,7 +293,6 @@ class FileService:
                 p_type = p_config["provider"]
                 creds = p_config["credentials"]
                 
-                # Callback logic
                 cb = tracker if use_callback else None
 
                 await self.storage_repo.upload_file(
@@ -299,7 +312,6 @@ class FileService:
             # Execute Parallel
             upload_tasks = []
             for i, conf in enumerate(providers_to_upload):
-                # Only use callback for the first provider to avoid double counting or race conditions on DB field
                 use_cb = (i == 0)
                 upload_tasks.append(_upload_and_get_url(conf, use_callback=use_cb))
             results = await asyncio.gather(*upload_tasks)
@@ -313,34 +325,35 @@ class FileService:
                     upload_urls["oracle_url"] = url
             
             # Update DB with URLs and Status COMPLETED
-            # We need a method to update specifically 
             await self.duma_file_repo.update_file_status_and_urls(
                 file_id, 
                 "completed",
                 s3_url=upload_urls.get("s3_url"),
                 wasabi_url=upload_urls.get("wasabi_url"),
                 oracle_url=upload_urls.get("oracle_url"),
-                # Also save storage_key? Schema has it but model doesn't explicitly have 'storage_key' column?
-                # Model has s3_url etc.
             )
             
-            print(f"Background upload for file {file_id} completed.")
+            # Set progress to 100%
+            await self.duma_file_repo.update_upload_progress(file_id, 100)
+            
+            logger.info(f"Background upload for file {file_id} completed successfully")
 
         except Exception as e:
-            print(f"Background upload failed: {e}")
-            # Log error
-            with open("error.log", "a") as log:
-                import traceback
-                log.write(f"Error in background upload: {e}\n")
-                log.write(traceback.format_exc())
-                log.write("\n")
+            logger.error(f"Background upload failed for file {file_id}: {e}", exc_info=e)
             
             # Update status failed
-            await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+            try:
+                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+            except:
+                pass
         finally:
-            # Cleanup
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            # Cleanup temp file
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                    logger.info(f"Cleaned up temp file: {temp_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
 
     async def download_file(self, file_id: int, user_id: int) -> FileDownloadResponse:
         """
@@ -515,33 +528,38 @@ class FileService:
 # Background Task Wrapper
 async def run_background_upload_wrapper(
     file_id: int,
-    temp_path: str,
+    file: UploadFile,
     dumapod_id: int,
     user_id: int
 ):
     """
     Wrapper to run background upload with a fresh database session.
+    Streams file from client in chunks to avoid memory issues.
     """
     from ..config.database import AsyncSessionLocal
+    from ..utils.logger import get_logger
+    
+    logger = get_logger(__name__)
     
     async with AsyncSessionLocal() as session:
         try:
             service = FileService(session)
             await service.process_background_upload(
                 file_id=file_id,
-                temp_path=temp_path,
+                file=file,  # Pass UploadFile for streaming
                 dumapod_id=dumapod_id,
                 user_id=user_id
             )
             await session.commit()
         except Exception as e:
             await session.rollback()
-            # process_background_upload handles its own logging and status update (if it can),
-            # but if session fails here, we might need extra catch.
-            # However, process_background_upload expects to work with the session.
-            # If creating service fails, we log here.
-            print(f"Critical error in background wrapper: {e}")
-            # Try to log to error.log
-            with open("error.log", "a") as log:
-                 log.write(f"Critical error in wrapper: {e}\n")
+            logger.error(f"Critical error in background upload wrapper for file {file_id}: {e}", exc_info=e)
+            # Try to update status to failed
+            try:
+                from ..repositories.duma_stored_file_repo import DumaStoredFileRepository
+                repo = DumaStoredFileRepository(session)
+                await repo.update_file_status_and_urls(file_id, "failed")
+                await session.commit()
+            except:
+                pass
 

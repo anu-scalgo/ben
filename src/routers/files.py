@@ -30,8 +30,8 @@ async def upload_file(
 ):
     """
     Upload a file to a specific DumaPod.
-    Supports streaming uploads for large files.
-    Automatically enqueues transcoding for video files.
+    Returns immediately (202 Accepted) - file streams in background.
+    Poll the file status endpoint to check upload progress.
     """
     file_service = FileService(db)
     response = await file_service.stage_upload(
@@ -40,10 +40,11 @@ async def upload_file(
     
     from ..services.file_service import run_background_upload_wrapper
     
+    # Pass file object to background task for streaming
     background_tasks.add_task(
         run_background_upload_wrapper,
         file_id=response.id,
-        temp_path=response.storage_key,
+        file=file,  # Pass UploadFile for streaming
         dumapod_id=dumapod_id,
         user_id=user.id
     )

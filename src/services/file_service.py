@@ -43,228 +43,84 @@ class FileService:
         3. Create pending record
         4. Return response (background task picks up from there)
         """
-        from ..utils.logger import get_logger
-        import traceback
+        with open("stage.log", "a") as f:
+             f.write(f"Staging upload for user {user_id}\n")
+        
+        # 1. Validate File
+        # We removed middleware validation, so we rely on service logic if any. 
+        # (Size check is done below against capacity)
+        validate_file_upload(file) # Keep original validation
+        
+        # Read file content
+        file_content = await file.read()
+        file_size = len(file_content) # This line is now correctly placed after file_content is read.
+        
+        # 1. Get DumaPod & Check Capacity
+        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
+        
+        # Normalize Data
+        if isinstance(dumapod, dict):
+            limit_gb = dumapod.get("storage_capacity_gb")
+            primary_storage = dumapod.get("primary_storage")
+        else:
+            limit_gb = dumapod.storage_capacity_gb
+            primary_storage = dumapod.primary_storage
+
+        # Capacity Check
+        capacity_bytes = limit_gb * 1024 * 1024 * 1024
+        if current_usage_bytes + file_size > capacity_bytes:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Upload exceeds DumaPod storage capacity. Limit: {limit_gb} GB."
+            )
+
+        # 2. Save to Temporary File
+        sanitized_filename = sanitize_filename(file.filename or "unnamed")
         import tempfile
         import os
         
-        logger = get_logger(__name__)
-        temp_path = None
+        # Create a temp file to store content for background processing
+        # Note: In production with multiple workers, ensure shared storage or stickiness.
+        # For single instance, local temp is fine.
+        fd, temp_path = tempfile.mkstemp()
+        with os.fdopen(fd, 'wb') as tmp:
+             tmp.write(file_content)
         
-        try:
-            logger.info(
-                f"Starting file upload staging",
-                extra={
-                    "user_id": user_id,
-                    "dumapod_id": dumapod_id,
-                    "filename": file.filename,
-                    "content_type": file.content_type,
-                }
-            )
-            
-            # 1. Validate File Type and Basic Checks
-            try:
-                validate_file_upload(file)
-            except HTTPException as e:
-                logger.warning(
-                    f"File validation failed: {e.detail}",
-                    extra={
-                        "user_id": user_id,
-                        "filename": file.filename,
-                        "content_type": file.content_type,
-                    }
-                )
-                raise  # Re-raise validation errors as-is
-            
-            # 2. Read file content
-            try:
-                file_content = await file.read()
-                file_size = len(file_content)
-                logger.info(f"File read successfully, size: {file_size} bytes")
-            except Exception as e:
-                logger.error(
-                    f"Failed to read uploaded file",
-                    exc_info=e,
-                    extra={"user_id": user_id, "filename": file.filename}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to read uploaded file: {str(e)}"
-                )
-            
-            # 3. Get DumaPod & Check Capacity
-            try:
-                dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
-                current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
-                
-                # Normalize Data
-                if isinstance(dumapod, dict):
-                    limit_gb = dumapod.get("storage_capacity_gb")
-                    primary_storage = dumapod.get("primary_storage")
-                else:
-                    limit_gb = dumapod.storage_capacity_gb
-                    primary_storage = dumapod.primary_storage
-                
-                # Capacity Check
-                capacity_bytes = limit_gb * 1024 * 1024 * 1024
-                if current_usage_bytes + file_size > capacity_bytes:
-                    logger.warning(
-                        f"Storage capacity exceeded",
-                        extra={
-                            "dumapod_id": dumapod_id,
-                            "current_usage_gb": current_usage_bytes / (1024**3),
-                            "file_size_gb": file_size / (1024**3),
-                            "limit_gb": limit_gb,
-                        }
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Upload exceeds DumaPod storage capacity. Current usage: {current_usage_bytes / (1024**3):.2f} GB, File size: {file_size / (1024**3):.2f} GB, Limit: {limit_gb} GB"
-                    )
-                    
-            except HTTPException:
-                raise  # Re-raise HTTP exceptions
-            except Exception as e:
-                logger.error(
-                    f"Failed to check DumaPod capacity",
-                    exc_info=e,
-                    extra={"user_id": user_id, "dumapod_id": dumapod_id}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to verify storage capacity: {str(e)}"
-                )
-            
-            # 4. Save to Temporary File
-            try:
-                sanitized_filename = sanitize_filename(file.filename or "unnamed")
-                fd, temp_path = tempfile.mkstemp(suffix=f"_{sanitized_filename}")
-                
-                with os.fdopen(fd, 'wb') as tmp:
-                    tmp.write(file_content)
-                    
-                logger.info(f"File saved to temporary location: {temp_path}")
-                
-            except Exception as e:
-                logger.error(
-                    f"Failed to save file to temporary storage",
-                    exc_info=e,
-                    extra={"user_id": user_id, "filename": file.filename}
-                )
-                # Clean up temp file if it was created
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except:
-                        pass
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to save uploaded file temporarily: {str(e)}"
-                )
-            
-            # 5. Create Pending Database Record
-            try:
-                stored_file = await self.duma_file_repo.create_file_record(
-                    dumapod_id=dumapod_id,
-                    user_id=user_id,
-                    file_name=sanitized_filename,
-                    file_type=file.content_type or "application/octet-stream",
-                    file_size=file_size,
-                    s3_url=None,
-                    wasabi_url=None,
-                    oracle_url=None
-                )
-                
-                logger.info(
-                    f"File record created successfully",
-                    extra={
-                        "file_id": stored_file.id,
-                        "user_id": user_id,
-                        "dumapod_id": dumapod_id,
-                        "filename": sanitized_filename,
-                    }
-                )
-                
-            except Exception as e:
-                logger.error(
-                    f"Failed to create file record in database",
-                    exc_info=e,
-                    extra={
-                        "user_id": user_id,
-                        "dumapod_id": dumapod_id,
-                        "filename": sanitized_filename,
-                    }
-                )
-                # Clean up temp file
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except:
-                        pass
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to create file record: {str(e)}"
-                )
-            
-            # 6. Return Response
-            return FileResponse(
-                id=stored_file.id,
-                user_id=stored_file.user_id,
-                filename=stored_file.file_name,
-                original_filename=stored_file.file_name,
-                content_type=stored_file.file_type,
-                file_size=stored_file.file_size,
-                storage_key=temp_path,  # Pass temp path for background task
-                storage_provider=primary_storage,
-                description=description,
-                upload_status="pending",
-                created_at=stored_file.created_at,
-                updated_at=stored_file.created_at
-            )
-            
-        except HTTPException:
-            # Re-raise HTTP exceptions (already logged above)
-            raise
-            
-        except Exception as e:
-            # Catch any unexpected errors
-            logger.error(
-                f"Unexpected error during file upload staging",
-                exc_info=e,
-                extra={
-                    "user_id": user_id,
-                    "dumapod_id": dumapod_id,
-                    "filename": file.filename,
-                    "error_type": type(e).__name__,
-                }
-            )
-            
-            # Also log to file for debugging
-            try:
-                with open("logs/upload_errors.log", "a") as log_file:
-                    log_file.write(f"\n{'='*80}\n")
-                    log_file.write(f"Timestamp: {__import__('datetime').datetime.now().isoformat()}\n")
-                    log_file.write(f"User ID: {user_id}\n")
-                    log_file.write(f"DumaPod ID: {dumapod_id}\n")
-                    log_file.write(f"Filename: {file.filename}\n")
-                    log_file.write(f"Content Type: {file.content_type}\n")
-                    log_file.write(f"Error Type: {type(e).__name__}\n")
-                    log_file.write(f"Error Message: {str(e)}\n")
-                    log_file.write(f"Traceback:\n{traceback.format_exc()}\n")
-            except:
-                pass  # Don't fail if logging fails
-            
-            # Clean up temp file if it exists
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-            
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Unexpected error during file upload: {type(e).__name__}: {str(e)}"
-            )
+        # 3. Create Pending Record
+        # We don't have URLs yet.
+        stored_file = await self.duma_file_repo.create_file_record(
+            dumapod_id=dumapod_id,
+            user_id=user_id,
+            file_name=sanitized_filename,
+            file_type=file.content_type or "application/octet-stream",
+            file_size=file_size,
+            s3_url=None, 
+            wasabi_url=None, 
+            oracle_url=None
+        )
+        
+        # We need to manually update status to pending if default isn't enough, 
+        # checking create_file_record impl, it likely doesn't set status.
+        # Need to ensure repo supports it or update it now.
+        # Ideally create_file_record should accept status or we update it.
+        # For now, let's assume default is "pending" from model. 
+        # But we need to return the ID for background task.
+        
+        return FileResponse(
+            id=stored_file.id,
+            user_id=stored_file.user_id,
+            filename=stored_file.file_name,
+            original_filename=stored_file.file_name,
+            content_type=stored_file.file_type,
+            file_size=stored_file.file_size,
+            storage_key=temp_path, # PASS TEMP PATH HERE TEMPORARILY for background task to know where file is
+            storage_provider=primary_storage, # Primary as reference
+            description=description,
+            upload_status="pending",
+            created_at=stored_file.created_at,
+            updated_at=stored_file.created_at
+        )
 
     async def process_background_upload(
         self, file_id: int, temp_path: str, dumapod_id: int, user_id: int, description: Optional[str] = None

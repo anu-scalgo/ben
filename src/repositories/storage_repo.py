@@ -136,6 +136,59 @@ class StorageRepository:
         except ClientError as e:
             raise ValueError(f"Failed to generate presigned URL: {e}")
 
+    async def generate_presigned_upload_url(
+        self,
+        key: str,
+        content_type: str,
+        file_size: int,
+        expiration: int = 3600,
+        provider: Optional[str] = None,
+        credentials: Optional[object] = None
+    ) -> dict:
+        """
+        Generate presigned URL for direct file upload.
+        
+        Args:
+            key: Storage key (path) for the file
+            content_type: MIME type of the file
+            file_size: Size of the file in bytes
+            expiration: URL expiration time in seconds (default: 1 hour)
+            provider: Storage provider (s3, wasabi, oracle_object_storage)
+            credentials: Optional custom credentials
+            
+        Returns:
+            Dictionary with:
+            - upload_url: Presigned URL for PUT upload
+            - method: HTTP method (always "PUT")
+            - headers: Required headers for the upload
+        """
+        client = await self._get_client(provider, credentials)
+        bucket = await self._get_bucket(provider, credentials)
+        
+        try:
+            # Generate presigned URL for PUT upload
+            url = client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": key,
+                    "ContentType": content_type,
+                    "ContentLength": file_size,
+                },
+                ExpiresIn=expiration,
+            )
+            
+            return {
+                "upload_url": url,
+                "method": "PUT",
+                "headers": {
+                    "Content-Type": content_type,
+                    "Content-Length": str(file_size),
+                }
+            }
+        except ClientError as e:
+            raise ValueError(f"Failed to generate presigned upload URL: {e}")
+
     async def delete_file(self, key: str, provider: Optional[str] = None) -> bool:
         """
         Delete file from storage.

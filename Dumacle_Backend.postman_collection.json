@@ -442,6 +442,67 @@
 					"response": []
 				},
 				{
+					"name": "Initiate Direct Upload (Recommended)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.environment.set(\"file_id\", jsonData.file_id);",
+									"pm.environment.set(\"upload_url\", jsonData.upload_url);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dumapod_id\": {{pod_id}},\n    \"filename\": \"document.pdf\",\n    \"content_type\": \"application/pdf\",\n    \"file_size\": 1048576,\n    \"description\": \"Test direct upload\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/initiate-upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"initiate-upload"
+							]
+						},
+						"description": "Step 1: Get presigned URL for direct S3 upload. This is the recommended upload method for better performance."
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Upload",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/files/confirm-upload/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"confirm-upload",
+								"{{file_id}}"
+							]
+						},
+						"description": "Step 2: Confirm that file was uploaded to S3. Call this after uploading to the presigned URL from initiate-upload."
+					},
+					"response": []
+				},
+				{
 					"name": "Download File",
 					"request": {
 						"method": "GET",
@@ -517,6 +578,11 @@
 		{
 			"key": "file_id",
 			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "upload_url",
+			"value": "",
 			"type": "string"
 		}
 	]

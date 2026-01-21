@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from ..config.database import get_db
 from ..services.file_service import FileService
-from ..schemas.file import FileResponse, FileListResponse, FileDownloadResponse
+from ..schemas.file import (
+    FileResponse,
+    FileListResponse,
+    FileDownloadResponse,
+    InitiateUploadRequest,
+    PresignedUploadResponse,
+)
 from ..middleware.auth import get_current_user
 from ..models.user import User
 from ..middleware.quota import check_quota
@@ -90,3 +96,56 @@ async def get_download_url(
         file_id=file_id, user_id=user.id, expiration=expiration
     )
 
+
+@router.post("/initiate-upload", response_model=PresignedUploadResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("20/minute")
+async def initiate_direct_upload(
+    request: Request,
+    upload_request: InitiateUploadRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Initiate direct upload to S3 - Step 1 of 2.
+    
+    Returns a presigned URL that the client can use to upload the file directly to S3/Wasabi/Oracle.
+    This bypasses the server for file data transfer, improving upload speed and reducing server load.
+    
+    **Flow**:
+    1. Client calls this endpoint with file metadata
+    2. Server validates and returns presigned URL
+    3. Client uploads file directly to S3 using the presigned URL
+    4. Client calls /confirm-upload/{file_id} to finalize
+    """
+    file_service = FileService(db)
+    return await file_service.initiate_direct_upload(
+        user_id=user.id,
+        dumapod_id=upload_request.dumapod_id,
+        filename=upload_request.filename,
+        content_type=upload_request.content_type,
+        file_size=upload_request.file_size,
+        description=upload_request.description
+    )
+
+
+@router.post("/confirm-upload/{file_id}", response_model=FileResponse, status_code=status.HTTP_200_OK)
+async def confirm_direct_upload(
+    file_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Confirm upload completion - Step 2 of 2.
+    
+    Call this endpoint after successfully uploading the file to S3 using the presigned URL.
+    The server will verify the file exists in storage and update the database.
+    
+    **Flow**:
+    1. Client uploads file to S3 using presigned URL from /initiate-upload
+    2. Client calls this endpoint to confirm upload
+    3. Server verifies file exists in S3
+    4. Server updates database status to 'completed'
+    5. Returns complete file details
+    """
+    file_service = FileService(db)
+    return await file_service.confirm_upload(file_id=file_id, user_id=user.id)

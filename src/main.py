@@ -60,8 +60,24 @@ app.add_middleware(
 # Exception handlers
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler."""
+    """Global exception handler with environment-aware error details."""
     logger.error("Unhandled exception", exc_info=exc, path=request.url.path)
+    
+    # In development/debug mode, expose detailed error information
+    if settings.debug or settings.environment.lower() in ["development", "dev"]:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "error": str(exc),
+                "type": type(exc).__name__,
+                "path": str(request.url.path),
+                "traceback": traceback.format_exc(),
+            },
+        )
+    
+    # In production mode, return generic error message
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},

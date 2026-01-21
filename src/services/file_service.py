@@ -171,8 +171,9 @@ class FileService:
             
             # 2. Read content from temp file for S3 upload
             if not os.path.exists(temp_path):
-                logger.error(f"Temp file {temp_path} not found for file {file_id}")
-                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+                error_msg = f"Temp file {temp_path} not found for file {file_id}"
+                logger.error(error_msg)
+                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
                 return
             
             # Read file content from temp path
@@ -274,8 +275,9 @@ class FileService:
                 if p: providers_to_upload.append(p)
             
             if not providers_to_upload:
-                 logger.error("No providers enabled")
-                 await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+                 error_msg = "No storage providers enabled for this DumaPod"
+                 logger.error(error_msg)
+                 await self.duma_file_repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
                  return
 
             # Fetch the record to get filename
@@ -341,9 +343,10 @@ class FileService:
         except Exception as e:
             logger.error(f"Background upload failed for file {file_id}: {e}", exc_info=e)
             
-            # Update status failed
+            # Update status failed with error details
+            error_msg = f"{type(e).__name__}: {str(e)}"
             try:
-                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
             except:
                 pass
         finally:
@@ -437,6 +440,7 @@ class FileService:
             description=None, # duma_stored_file table doesn't have description column? Model doesn't show it.
             upload_status=file_record.upload_status,
             upload_progress=file_record.upload_progress,
+            failed_reason=file_record.failed_reason,
             s3_url=file_record.s3_url,
             wasabi_url=file_record.wasabi_url,
             oracle_url=file_record.oracle_url,
@@ -481,6 +485,7 @@ class FileService:
                 description=None, 
                 upload_status=f.upload_status,
                 upload_progress=f.upload_progress,
+                failed_reason=f.failed_reason,
                 s3_url=f.s3_url,
                 wasabi_url=f.wasabi_url,
                 oracle_url=f.oracle_url,
@@ -501,7 +506,7 @@ class FileService:
         self, file_id: int, user_id: int, expiration: int = 3600
     ) -> FileDownloadResponse:
         """Generate presigned download URL for file."""
-        file_record = await self.file_repo.get_by_id_and_user(file_id, user_id)
+        file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
 
         if not file_record:
             raise HTTPException(
@@ -509,8 +514,11 @@ class FileService:
                 detail="File not found",
             )
 
+        # Use storage_key from database
+        storage_key = file_record.storage_key if file_record.storage_key else self.storage_repo.generate_key(user_id, file_record.file_name)
+        
         download_url = await self.storage_repo.generate_presigned_url(
-            file_record["storage_key"], expiration=expiration
+            storage_key, expiration=expiration
         )
 
         return FileDownloadResponse(
@@ -518,12 +526,266 @@ class FileService:
             filename=file_record.file_name,
             download_url=download_url,
             expires_in=expiration,
-            file_size=file_record.file_size, # Assuming dict key access for old repo, but wait, file_record is from get_by_id_and_user in file_repo which returns dict?
-            # Wait, get_download_url uses file_repo.get_by_id_and_user (old repo).
-            # The new download_file (if implemented) uses duma_file_repo.
-            # I should stick to appending the wrapper.
-            content_type=file_record.content_type,
+            file_size=file_record.file_size,
+            content_type=file_record.file_type,
         )
+
+    async def initiate_direct_upload(
+        self,
+        user_id: int,
+        dumapod_id: int,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        description: Optional[str] = None
+    ):
+        """
+        Initiate direct upload flow - returns presigned URL for client to upload directly to S3.
+        
+        Steps:
+        1. Validate file type and size
+        2. Check DumaPod capacity
+        3. Create database record with status='pending_upload'
+        4. Generate presigned URL for primary storage provider
+        5. Return upload URL to client
+        """
+        from ..utils.logger import get_logger
+        from ..schemas.file import PresignedUploadResponse
+        
+        logger = get_logger(__name__)
+        
+        logger.info(f"Initiating direct upload for user {user_id}, file: {filename}")
+        
+        # 1. Validate file size (content_type already validated by schema)
+        from ..config import settings
+        # Skip file size check if MAX_FILE_SIZE_MB is set to 0 (unlimited)
+        if settings.max_file_size_mb > 0 and file_size > settings.max_file_size_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
+            )
+        
+        # 2. Get DumaPod & Check Capacity
+        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
+        
+        # Normalize Data
+        if isinstance(dumapod, dict):
+            limit_gb = dumapod.get("storage_capacity_gb")
+            primary_storage = dumapod.get("primary_storage")
+            use_custom = dumapod.get(f"use_custom_{primary_storage.lower()}")
+        else:
+            limit_gb = dumapod.storage_capacity_gb
+            primary_storage = dumapod.primary_storage
+            # Determine if using custom credentials
+            if primary_storage == StorageProvider.AWS_S3:
+                use_custom = dumapod.use_custom_s3
+            elif primary_storage == StorageProvider.WASABI:
+                use_custom = dumapod.use_custom_wasabi
+            elif primary_storage == StorageProvider.ORACLE_OS:
+                use_custom = dumapod.use_custom_oracle
+            else:
+                use_custom = False
+        
+        # Capacity Check
+        capacity_bytes = limit_gb * 1024 * 1024 * 1024
+        if current_usage_bytes + file_size > capacity_bytes:
+            logger.warning(
+                f"Storage capacity exceeded for dumapod {dumapod_id}: "
+                f"current={current_usage_bytes / (1024**3):.2f}GB, "
+                f"file={file_size / (1024**3):.2f}GB, "
+                f"limit={limit_gb}GB"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Upload exceeds DumaPod storage capacity. Current: {current_usage_bytes / (1024**3):.2f} GB, File: {file_size / (1024**3):.2f} GB, Limit: {limit_gb} GB"
+            )
+        
+        # 3. Create Database Record with "pending_upload" status
+        sanitized_filename = sanitize_filename(filename)
+        storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
+        
+        stored_file = await self.duma_file_repo.create_file_record(
+            dumapod_id=dumapod_id,
+            user_id=user_id,
+            file_name=sanitized_filename,
+            file_type=content_type,
+            file_size=file_size,
+            storage_key=storage_key,  # Store the key for later use
+            s3_url=None,
+            wasabi_url=None,
+            oracle_url=None,
+            upload_status="pending_upload"  # Waiting for client to upload
+        )
+        
+        logger.info(
+            f"File record created: id={stored_file.id}, "
+            f"size={file_size / (1024**2):.2f}MB, status=pending_upload"
+        )
+        
+        # 4. Get credentials if using custom
+        credentials = None
+        if use_custom:
+            credentials = await self.credential_service.repo.get_by_dumapod_and_provider(
+                dumapod_id, primary_storage
+            )
+            if not credentials:
+                logger.warning(f"Custom credentials not found for {primary_storage}")
+                # Fall back to default credentials
+        
+        # 5. Generate presigned URL
+        try:
+            presigned_data = await self.storage_repo.generate_presigned_upload_url(
+                key=storage_key,
+                content_type=content_type,
+                file_size=file_size,
+                expiration=3600,  # 1 hour
+                provider=primary_storage.value if hasattr(primary_storage, 'value') else primary_storage,
+                credentials=credentials
+            )
+            
+            return PresignedUploadResponse(
+                file_id=stored_file.id,
+                upload_url=presigned_data["upload_url"],
+                upload_method=presigned_data["method"],
+                upload_headers=presigned_data["headers"],
+                expires_in=3600,
+                storage_key=storage_key,
+                storage_provider=primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
+            )
+        except Exception as e:
+            # Clean up database record if presigned URL generation fails
+            logger.error(f"Failed to generate presigned URL: {e}")
+            await self.duma_file_repo.update_file_status_and_urls(
+                stored_file.id, "failed", failed_reason=f"Failed to generate upload URL: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate upload URL: {str(e)}"
+            )
+
+    async def confirm_upload(self, file_id: int, user_id: int) -> FileResponse:
+        """
+        Confirm upload completion - verifies file exists in S3 and updates database.
+        
+        Steps:
+        1. Get file record and verify ownership
+        2. Verify file exists in storage
+        3. Update status to 'completed'
+        4. Generate storage URLs
+        5. Return file details
+        """
+        from ..utils.logger import get_logger
+        logger = get_logger(__name__)
+        
+        logger.info(f"Confirming upload for file {file_id}, user {user_id}")
+        
+        # 1. Get file record
+        file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
+        if not file_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        # Check if already completed
+        if file_record.upload_status == "completed":
+            logger.info(f"File {file_id} already marked as completed")
+            return await self.get_file_details(file_id, user_id)
+        
+        # Check if in correct status
+        if file_record.upload_status != "pending_upload":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File is in '{file_record.upload_status}' status, cannot confirm upload"
+            )
+        
+        # 2. Get DumaPod to determine storage provider
+        dumapod = await self.dumapod_service.get_dumapod(file_record.dumapod_id)
+        if isinstance(dumapod, dict):
+            primary_storage = dumapod.get("primary_storage")
+        else:
+            primary_storage = dumapod.primary_storage
+        
+        # 3. Verify file exists in storage
+        # Use the stored storage_key instead of regenerating (which would create a different path)
+        storage_key = file_record.storage_key
+        
+        if not storage_key:
+            # Fallback for old records without storage_key
+            logger.warning(f"File {file_id} has no storage_key, regenerating (may not match actual location)")
+            storage_key = self.storage_repo.generate_key(user_id, file_record.file_name)
+        
+        logger.info(
+            f"Checking file existence - "
+            f"file_id={file_id}, "
+            f"storage_key={storage_key}, "
+            f"provider={primary_storage}, "
+            f"user_id={user_id}, "
+            f"filename={file_record.file_name}"
+        )
+        
+        try:
+            provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
+            bucket = await self.storage_repo._get_bucket(provider_value)
+            
+            logger.info(f"Checking in bucket: {bucket}, key: {storage_key}")
+            
+            exists = await self.storage_repo.file_exists(
+                key=storage_key,
+                provider=provider_value
+            )
+            
+            logger.info(f"File exists check result: {exists}")
+            
+            if not exists:
+                error_msg = f"File not found in storage. Bucket: {bucket}, Key: {storage_key}, Provider: {provider_value}"
+                logger.error(f"File {file_id} not found - {error_msg}")
+                await self.duma_file_repo.update_file_status_and_urls(
+                    file_id, "failed", failed_reason=error_msg
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File not found in storage. Please upload the file using the presigned URL first. Expected location: {bucket}/{storage_key}"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error checking file existence: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to verify file upload: {str(e)}"
+            )
+        
+        # 4. Generate storage URL
+        bucket_name = await self.storage_repo._get_bucket(
+            primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
+        )
+        provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
+        storage_url = f"{provider_value}://{bucket_name}/{storage_key}"
+        
+        # Update database with URL and status
+        url_field = {}
+        if primary_storage == StorageProvider.AWS_S3 or provider_value == "aws_s3":
+            url_field["s3_url"] = storage_url
+        elif primary_storage == StorageProvider.WASABI or provider_value == "wasabi":
+            url_field["wasabi_url"] = storage_url
+        elif primary_storage == StorageProvider.ORACLE_OS or provider_value == "oracle_object_storage":
+            url_field["oracle_url"] = storage_url
+        
+        await self.duma_file_repo.update_file_status_and_urls(
+            file_id,
+            "completed",
+            **url_field
+        )
+        
+        # Set progress to 100%
+        await self.duma_file_repo.update_upload_progress(file_id, 100)
+        
+        logger.info(f"Upload confirmed for file {file_id}")
+        
+        # 5. Return file details
+        return await self.get_file_details(file_id, user_id)
 
 # Background Task Wrapper
 async def run_background_upload_wrapper(
@@ -554,11 +816,12 @@ async def run_background_upload_wrapper(
         except Exception as e:
             await session.rollback()
             logger.error(f"Critical error in background upload wrapper for file {file_id}: {e}", exc_info=e)
-            # Try to update status to failed
+            # Try to update status to failed with error details
+            error_msg = f"{type(e).__name__}: {str(e)}"
             try:
                 from ..repositories.duma_stored_file_repo import DumaStoredFileRepository
                 repo = DumaStoredFileRepository(session)
-                await repo.update_file_status_and_urls(file_id, "failed")
+                await repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
                 await session.commit()
             except:
                 pass

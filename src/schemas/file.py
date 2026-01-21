@@ -36,6 +36,7 @@ class FileResponse(BaseModel):
     )
     upload_status: str = Field(default="pending", description="pending, processing, completed, failed")
     upload_progress: int = Field(default=0, description="Upload progress percentage (0-100)")
+    failed_reason: Optional[str] = Field(default=None, description="Error message if upload failed")
     
     s3_url: Optional[str] = None
     wasabi_url: Optional[str] = None
@@ -68,3 +69,35 @@ class FileDownloadResponse(BaseModel):
     file_size: int
     content_type: str
 
+
+
+class InitiateUploadRequest(BaseModel):
+    """Request to initiate direct upload."""
+    
+    dumapod_id: int = Field(..., description="ID of the DumaPod to upload to")
+    filename: str = Field(..., min_length=1, max_length=255, description="Original filename")
+    content_type: str = Field(..., description="MIME type of the file")
+    file_size: int = Field(..., gt=0, description="File size in bytes")
+    description: Optional[str] = Field(None, max_length=500, description="Optional file description")
+    
+    # Apply validators
+    _validate_file_size = FileValidators.validate_file_size_bytes
+    _validate_content_type = FileValidators.validate_content_type
+
+
+class PresignedUploadResponse(BaseModel):
+    """Response with presigned upload URL for direct S3 upload."""
+    
+    file_id: int = Field(..., description="Database ID of the file record")
+    upload_url: str = Field(..., description="Presigned URL for uploading the file")
+    upload_method: str = Field(default="PUT", description="HTTP method to use (PUT or POST)")
+    upload_headers: dict = Field(default_factory=dict, description="Required headers for the upload")
+    expires_in: int = Field(default=3600, description="URL expiration time in seconds")
+    storage_key: str = Field(..., description="Storage key (path) where file will be stored")
+    storage_provider: str = Field(..., description="Storage provider (s3, wasabi, oracle)")
+
+
+class ConfirmUploadRequest(BaseModel):
+    """Request to confirm upload completion (optional, can use empty POST)."""
+    
+    pass  # No fields needed, file_id comes from URL path

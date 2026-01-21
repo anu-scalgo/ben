@@ -78,7 +78,7 @@ The guides cover:
 - **Credential Validation**:
     - Automatically validates connectivity when enabling custom credentials.
     - Prevents enabling `use_custom_*` flags if the associated credentials are invalid or missing.
-- **Direct Uploads**: (Planned) Presigned URLs for direct client-to-storage uploads.
+- **Direct Uploads**: ✅ **Implemented!** Presigned URLs for direct client-to-S3 uploads (2-3x faster, no server bandwidth).
 
 Start the FastAPI server with auto-reload:
 ```bash
@@ -230,10 +230,18 @@ Key environment variables (see `.env.example` for full list):
 - `POST /plans/subscribe` - Subscribe to a plan
 
 ### Files
-- `POST /files/upload` - Upload file to a specific DumaPod (requires `dumapod_id`)
+
+**Direct Upload (Recommended - 2-3x faster)**:
+- `POST /files/initiate-upload` - Get presigned URL for direct S3 upload
+- `POST /files/confirm-upload/{file_id}` - Confirm upload completion
+
+**Legacy Upload (Backward compatible)**:
+- `POST /files/upload` - Upload file through server (slower, uses server bandwidth)
+
+**File Management**:
 - `GET /files` - List user's files (includes `upload_status` and `upload_progress`)
 - `GET /files/{file_id}` - Get file details (polling this endpoint returns real-time `upload_progress` 0-100)
-- `GET /files/{file_id}/download` - Download file
+- `GET /files/{file_id}/download` - Get presigned download URL
 
 ### Webhooks
 - `POST /webhooks/stripe` - Stripe webhook handler

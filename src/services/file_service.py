@@ -558,7 +558,8 @@ class FileService:
         
         # 1. Validate file size (content_type already validated by schema)
         from ..config import settings
-        if file_size > settings.max_file_size_bytes:
+        # Skip file size check if MAX_FILE_SIZE_MB is set to 0 (unlimited)
+        if settings.max_file_size_mb > 0 and file_size > settings.max_file_size_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"

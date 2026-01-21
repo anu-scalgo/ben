@@ -506,7 +506,7 @@ class FileService:
         self, file_id: int, user_id: int, expiration: int = 3600
     ) -> FileDownloadResponse:
         """Generate presigned download URL for file."""
-        file_record = await self.file_repo.get_by_id_and_user(file_id, user_id)
+        file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
 
         if not file_record:
             raise HTTPException(
@@ -514,8 +514,11 @@ class FileService:
                 detail="File not found",
             )
 
+        # Use storage_key from database
+        storage_key = file_record.storage_key if file_record.storage_key else self.storage_repo.generate_key(user_id, file_record.file_name)
+        
         download_url = await self.storage_repo.generate_presigned_url(
-            file_record["storage_key"], expiration=expiration
+            storage_key, expiration=expiration
         )
 
         return FileDownloadResponse(
@@ -523,11 +526,8 @@ class FileService:
             filename=file_record.file_name,
             download_url=download_url,
             expires_in=expiration,
-            file_size=file_record.file_size, # Assuming dict key access for old repo, but wait, file_record is from get_by_id_and_user in file_repo which returns dict?
-            # Wait, get_download_url uses file_repo.get_by_id_and_user (old repo).
-            # The new download_file (if implemented) uses duma_file_repo.
-            # I should stick to appending the wrapper.
-            content_type=file_record.content_type,
+            file_size=file_record.file_size,
+            content_type=file_record.file_type,
         )
 
     async def initiate_direct_upload(
@@ -611,6 +611,7 @@ class FileService:
             file_name=sanitized_filename,
             file_type=content_type,
             file_size=file_size,
+            storage_key=storage_key,  # Store the key for later use
             s3_url=None,
             wasabi_url=None,
             oracle_url=None,
@@ -707,27 +708,50 @@ class FileService:
             primary_storage = dumapod.primary_storage
         
         # 3. Verify file exists in storage
-        storage_key = self.storage_repo.generate_key(user_id, file_record.file_name)
+        # Use the stored storage_key instead of regenerating (which would create a different path)
+        storage_key = file_record.storage_key
+        
+        if not storage_key:
+            # Fallback for old records without storage_key
+            logger.warning(f"File {file_id} has no storage_key, regenerating (may not match actual location)")
+            storage_key = self.storage_repo.generate_key(user_id, file_record.file_name)
+        
+        logger.info(
+            f"Checking file existence - "
+            f"file_id={file_id}, "
+            f"storage_key={storage_key}, "
+            f"provider={primary_storage}, "
+            f"user_id={user_id}, "
+            f"filename={file_record.file_name}"
+        )
         
         try:
+            provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
+            bucket = await self.storage_repo._get_bucket(provider_value)
+            
+            logger.info(f"Checking in bucket: {bucket}, key: {storage_key}")
+            
             exists = await self.storage_repo.file_exists(
                 key=storage_key,
-                provider=primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
+                provider=provider_value
             )
             
+            logger.info(f"File exists check result: {exists}")
+            
             if not exists:
-                logger.error(f"File {file_id} not found in storage at key: {storage_key}")
+                error_msg = f"File not found in storage. Bucket: {bucket}, Key: {storage_key}, Provider: {provider_value}"
+                logger.error(f"File {file_id} not found - {error_msg}")
                 await self.duma_file_repo.update_file_status_and_urls(
-                    file_id, "failed", failed_reason="File not found in storage after upload"
+                    file_id, "failed", failed_reason=error_msg
                 )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="File not found in storage. Please upload the file using the presigned URL first."
+                    detail=f"File not found in storage. Please upload the file using the presigned URL first. Expected location: {bucket}/{storage_key}"
                 )
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error checking file existence: {e}")
+            logger.error(f"Error checking file existence: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to verify file upload: {str(e)}"

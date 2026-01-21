@@ -5,7 +5,9 @@ from typing import Optional
 import boto3
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
+from botocore.config import Config
 from ..config.storage import get_storage_client, get_bucket_name
+from ..config import settings
 from ..utils.helpers import generate_s3_key
 
 

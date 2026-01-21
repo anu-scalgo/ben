@@ -483,6 +483,36 @@
 					"response": []
 				},
 				{
+					"name": "Upload to S3 (Step 2)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/pdf",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "file",
+							"file": {
+								"src": ""
+							}
+						},
+						"url": {
+							"raw": "{{upload_url}}",
+							"host": [
+								"{{upload_url}}"
+							]
+						},
+						"description": "Step 2: Upload file directly to S3 using the presigned URL. \n\n**Instructions**:\n1. Run 'Initiate Direct Upload' first to get the upload_url\n2. In Body tab, select 'binary' and choose your file\n3. Make sure Content-Type header matches your file type\n4. Click Send\n5. You should get a 200 OK response from S3"
+					},
+					"response": []
+				},
+				{
 					"name": "Confirm Upload",
 					"request": {
 						"method": "POST",
@@ -498,7 +528,7 @@
 								"{{file_id}}"
 							]
 						},
-						"description": "Step 2: Confirm that file was uploaded to S3. Call this after uploading to the presigned URL from initiate-upload."
+						"description": "Step 3: Confirm that file was uploaded to S3. Call this after uploading to the presigned URL from initiate-upload."
 					},
 					"response": []
 				},

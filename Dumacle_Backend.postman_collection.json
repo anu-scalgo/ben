@@ -533,6 +533,136 @@
 					"response": []
 				},
 				{
+					"name": "Initiate Multipart Upload (Large Files >100MB)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.environment.set(\"file_id\", jsonData.file_id);",
+									"pm.environment.set(\"multipart_upload_id\", jsonData.upload_id);",
+									"pm.environment.set(\"part_1_url\", jsonData.parts[0].upload_url);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dumapod_id\": {{pod_id}},\n    \"filename\": \"large-file.mp4\",\n    \"content_type\": \"video/mp4\",\n    \"file_size\": 524288000,\n    \"description\": \"Large file upload test\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/initiate-multipart-upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"initiate-multipart-upload"
+							]
+						},
+						"description": "For files >100MB, use multipart upload. Returns presigned URLs for each part."
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Part to S3 (Multipart)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "video/mp4",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "file",
+							"file": {
+								"src": ""
+							}
+						},
+						"url": {
+							"raw": "{{part_1_url}}",
+							"host": [
+								"{{part_1_url}}"
+							]
+						},
+						"description": "Upload each part to S3. Save the ETag from response headers!"
+					},
+					"response": []
+				},
+				{
+					"name": "Complete Multipart Upload",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"upload_id\": \"{{multipart_upload_id}}\",\n    \"parts\": [\n        {\"part_number\": 1, \"etag\": \"abc123\"},\n        {\"part_number\": 2, \"etag\": \"def456\"}\n    ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/complete-multipart-upload/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"complete-multipart-upload",
+								"{{file_id}}"
+							]
+						},
+						"description": "Complete multipart upload with all part ETags"
+					},
+					"response": []
+				},
+				{
+					"name": "Abort Multipart Upload",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"upload_id\": \"{{multipart_upload_id}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/abort-multipart-upload/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"abort-multipart-upload",
+								"{{file_id}}"
+							]
+						},
+						"description": "Cancel multipart upload and cleanup"
+					},
+					"response": []
+				},
+				{
 					"name": "Download File",
 					"request": {
 						"method": "GET",
@@ -612,6 +742,16 @@
 		},
 		{
 			"key": "upload_url",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "multipart_upload_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "part_1_url",
 			"value": "",
 			"type": "string"
 		}

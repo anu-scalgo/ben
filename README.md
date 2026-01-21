@@ -78,7 +78,9 @@ The guides cover:
 - **Credential Validation**:
     - Automatically validates connectivity when enabling custom credentials.
     - Prevents enabling `use_custom_*` flags if the associated credentials are invalid or missing.
-- **Direct Uploads**: ✅ **Implemented!** Presigned URLs for direct client-to-S3 uploads (2-3x faster, no server bandwidth).
+- **Direct Uploads**: ✅ **Implemented!** Presigned URLs for direct client-to-S3 uploads
+    - Single PUT: Up to 5GB (2-3x faster, no server bandwidth)
+    - Multipart: Up to 5TB (parallel uploads, resume support)
 
 Start the FastAPI server with auto-reload:
 ```bash
@@ -231,16 +233,21 @@ Key environment variables (see `.env.example` for full list):
 
 ### Files
 
-**Direct Upload (Recommended - 2-3x faster)**:
-- `POST /files/initiate-upload` - Get presigned URL for direct S3 upload
+**Direct Upload (Recommended for files <100MB)**:
+- `POST /files/initiate-upload` - Get presigned URL for direct S3 upload (max 5GB)
 - `POST /files/confirm-upload/{file_id}` - Confirm upload completion
 
+**Multipart Upload (Required for files >5GB, recommended for >100MB)**:
+- `POST /files/initiate-multipart-upload` - Get presigned URLs for each part (supports up to 5TB)
+- `POST /files/complete-multipart-upload/{file_id}` - Finalize multipart upload
+- `POST /files/abort-multipart-upload/{file_id}` - Cancel multipart upload
+
 **Legacy Upload (Backward compatible)**:
-- `POST /files/upload` - Upload file through server (slower, uses server bandwidth)
+- `POST /files/upload` - Upload file through server (slower, max 2GB)
 
 **File Management**:
-- `GET /files` - List user's files (includes `upload_status` and `upload_progress`)
-- `GET /files/{file_id}` - Get file details (polling this endpoint returns real-time `upload_progress` 0-100)
+- `GET /files` - List user's files
+- `GET /files/{file_id}` - Get file details
 - `GET /files/{file_id}/download` - Get presigned download URL
 
 ### Webhooks

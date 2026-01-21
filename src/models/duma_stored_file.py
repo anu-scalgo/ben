@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, String, Integer, ForeignKey
+from sqlalchemy import BigInteger, DateTime, String, Integer, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -24,6 +24,7 @@ class DumaStoredFile(Base):
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     upload_status: Mapped[str] = mapped_column(String, default="pending", nullable=True)
     upload_progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Store URLs/Links for each provider
     s3_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)

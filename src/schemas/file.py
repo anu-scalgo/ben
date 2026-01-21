@@ -36,6 +36,7 @@ class FileResponse(BaseModel):
     )
     upload_status: str = Field(default="pending", description="pending, processing, completed, failed")
     upload_progress: int = Field(default=0, description="Upload progress percentage (0-100)")
+    failed_reason: Optional[str] = Field(default=None, description="Error message if upload failed")
     
     s3_url: Optional[str] = None
     wasabi_url: Optional[str] = None

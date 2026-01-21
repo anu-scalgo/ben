@@ -171,8 +171,9 @@ class FileService:
             
             # 2. Read content from temp file for S3 upload
             if not os.path.exists(temp_path):
-                logger.error(f"Temp file {temp_path} not found for file {file_id}")
-                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+                error_msg = f"Temp file {temp_path} not found for file {file_id}"
+                logger.error(error_msg)
+                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
                 return
             
             # Read file content from temp path
@@ -274,8 +275,9 @@ class FileService:
                 if p: providers_to_upload.append(p)
             
             if not providers_to_upload:
-                 logger.error("No providers enabled")
-                 await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+                 error_msg = "No storage providers enabled for this DumaPod"
+                 logger.error(error_msg)
+                 await self.duma_file_repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
                  return
 
             # Fetch the record to get filename
@@ -341,9 +343,10 @@ class FileService:
         except Exception as e:
             logger.error(f"Background upload failed for file {file_id}: {e}", exc_info=e)
             
-            # Update status failed
+            # Update status failed with error details
+            error_msg = f"{type(e).__name__}: {str(e)}"
             try:
-                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed")
+                await self.duma_file_repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
             except:
                 pass
         finally:
@@ -437,6 +440,7 @@ class FileService:
             description=None, # duma_stored_file table doesn't have description column? Model doesn't show it.
             upload_status=file_record.upload_status,
             upload_progress=file_record.upload_progress,
+            failed_reason=file_record.failed_reason,
             s3_url=file_record.s3_url,
             wasabi_url=file_record.wasabi_url,
             oracle_url=file_record.oracle_url,
@@ -481,6 +485,7 @@ class FileService:
                 description=None, 
                 upload_status=f.upload_status,
                 upload_progress=f.upload_progress,
+                failed_reason=f.failed_reason,
                 s3_url=f.s3_url,
                 wasabi_url=f.wasabi_url,
                 oracle_url=f.oracle_url,
@@ -554,11 +559,12 @@ async def run_background_upload_wrapper(
         except Exception as e:
             await session.rollback()
             logger.error(f"Critical error in background upload wrapper for file {file_id}: {e}", exc_info=e)
-            # Try to update status to failed
+            # Try to update status to failed with error details
+            error_msg = f"{type(e).__name__}: {str(e)}"
             try:
                 from ..repositories.duma_stored_file_repo import DumaStoredFileRepository
                 repo = DumaStoredFileRepository(session)
-                await repo.update_file_status_and_urls(file_id, "failed")
+                await repo.update_file_status_and_urls(file_id, "failed", failed_reason=error_msg)
                 await session.commit()
             except:
                 pass

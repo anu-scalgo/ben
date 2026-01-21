@@ -73,6 +73,7 @@ class DumaStoredFileRepository(BaseRepository):
         s3_url: Optional[str] = None,
         wasabi_url: Optional[str] = None,
         oracle_url: Optional[str] = None,
+        failed_reason: Optional[str] = None,
     ) -> Optional[DumaStoredFile]:
         """Update file status and URLs."""
         # Use direct update to avoid ORM session conflicts with progress tracking
@@ -99,6 +100,9 @@ class DumaStoredFileRepository(BaseRepository):
         if oracle_url is not None:
             update_values["oracle"] = oracle_url
             set_clauses.append("oracle_url = :oracle")
+        if failed_reason is not None:
+            update_values["failed_reason"] = failed_reason
+            set_clauses.append("failed_reason = :failed_reason")
             
         final_stmt = text(f"UPDATE duma_stored_files SET {', '.join(set_clauses)} WHERE id = :id")
         final_stmt = final_stmt.bindparams(id=file_id, **update_values)

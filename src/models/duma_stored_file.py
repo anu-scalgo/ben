@@ -23,6 +23,12 @@ class DumaStoredFile(Base):
     file_type: Mapped[str] = mapped_column(String, nullable=False)  # content_type
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # S3 key/path
+    
+    # Multipart upload fields
+    multipart_upload_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # AWS upload ID
+    total_parts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Number of parts
+    uploaded_parts: Mapped[Optional[int]] = mapped_column(Integer, default=0, nullable=True)  # Parts completed
+    
     upload_status: Mapped[str] = mapped_column(String, default="pending", nullable=True)
     upload_progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

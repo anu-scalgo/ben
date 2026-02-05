@@ -5,7 +5,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from ..config.database import get_db
 from ..services.file_service import FileService
-from ..schemas.file import FileResponse, FileListResponse, FileDownloadResponse
+from ..schemas.file import (
+    FileResponse,
+    FileListResponse,
+    FileDownloadResponse,
+    InitiateUploadRequest,
+    PresignedUploadResponse,
+    InitiateMultipartUploadRequest,
+    InitiateMultipartUploadResponse,
+    CompleteMultipartUploadRequest,
+    AbortMultipartUploadRequest,
+)
 from ..middleware.auth import get_current_user
 from ..models.user import User
 from ..middleware.quota import check_quota
@@ -30,8 +40,8 @@ async def upload_file(
 ):
     """
     Upload a file to a specific DumaPod.
-    Supports streaming uploads for large files.
-    Automatically enqueues transcoding for video files.
+    Returns immediately (202 Accepted) - file streams in background.
+    Poll the file status endpoint to check upload progress.
     """
     file_service = FileService(db)
     response = await file_service.stage_upload(
@@ -40,10 +50,11 @@ async def upload_file(
     
     from ..services.file_service import run_background_upload_wrapper
     
+    # Pass file object to background task for streaming
     background_tasks.add_task(
         run_background_upload_wrapper,
         file_id=response.id,
-        temp_path=response.storage_key,
+        file=file,  # Pass UploadFile for streaming
         dumapod_id=dumapod_id,
         user_id=user.id
     )
@@ -89,3 +100,120 @@ async def get_download_url(
         file_id=file_id, user_id=user.id, expiration=expiration
     )
 
+
+@router.post("/initiate-upload", response_model=PresignedUploadResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("20/minute")
+async def initiate_direct_upload(
+    request: Request,
+    upload_request: InitiateUploadRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Initiate direct upload to S3 - Step 1 of 2.
+    
+    Returns a presigned URL that the client can use to upload the file directly to S3/Wasabi/Oracle.
+    This bypasses the server for file data transfer, improving upload speed and reducing server load.
+    
+    **Flow**:
+    1. Client calls this endpoint with file metadata
+    2. Server validates and returns presigned URL
+    3. Client uploads file directly to S3 using the presigned URL
+    4. Client calls /confirm-upload/{file_id} to finalize
+    """
+    file_service = FileService(db)
+    return await file_service.initiate_direct_upload(
+        user_id=user.id,
+        dumapod_id=upload_request.dumapod_id,
+        filename=upload_request.filename,
+        content_type=upload_request.content_type,
+        file_size=upload_request.file_size,
+        description=upload_request.description
+    )
+
+
+@router.post("/confirm-upload/{file_id}", response_model=FileResponse, status_code=status.HTTP_200_OK)
+async def confirm_direct_upload(
+    file_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Confirm upload completion - Step 2 of 2.
+    
+    Call this endpoint after successfully uploading the file to S3 using the presigned URL.
+    The server will verify the file exists in storage and update the database.
+    
+    **Flow**:
+    1. Client uploads file to S3 using presigned URL from /initiate-upload
+    2. Client calls this endpoint to confirm upload
+    3. Server verifies file exists in S3
+    4. Server updates database status to 'completed'
+    5. Returns complete file details
+    """
+    file_service = FileService(db)
+    return await file_service.confirm_upload(file_id=file_id, user_id=user.id)
+
+
+@router.post("/initiate-multipart-upload", response_model=InitiateMultipartUploadResponse)
+async def initiate_multipart_upload(
+    request: InitiateMultipartUploadRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Initiate multipart upload for large files (>100MB recommended).
+    
+    Returns presigned URLs for each part that the client uploads directly to S3.
+    """
+    file_service = FileService(db)
+    return await file_service.initiate_multipart_upload(
+        user_id=user.id,
+        dumapod_id=request.dumapod_id,
+        filename=request.filename,
+        content_type=request.content_type,
+        file_size=request.file_size,
+        part_size=request.part_size,
+        description=request.description
+    )
+
+
+@router.post("/complete-multipart-upload/{file_id}", response_model=FileResponse)
+async def complete_multipart_upload(
+    file_id: int,
+    request: CompleteMultipartUploadRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Complete multipart upload after all parts have been uploaded to S3.
+    
+    Provide the upload_id and list of parts with their ETags.
+    """
+    file_service = FileService(db)
+    return await file_service.complete_multipart_upload(
+        file_id=file_id,
+        user_id=user.id,
+        upload_id=request.upload_id,
+        parts=[{"part_number": p.part_number, "etag": p.etag} for p in request.parts]
+    )
+
+
+@router.post("/abort-multipart-upload/{file_id}")
+async def abort_multipart_upload(
+    file_id: int,
+    request: AbortMultipartUploadRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Abort multipart upload and clean up uploaded parts.
+    
+    Use this if the upload fails or is cancelled.
+    """
+    file_service = FileService(db)
+    return await file_service.abort_multipart_upload(
+        file_id=file_id,
+        user_id=user.id,
+        upload_id=request.upload_id
+    )

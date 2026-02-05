@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Dict
 from pydantic import BaseModel, Field
 from ..models.dumapod import StorageProvider
 
@@ -11,9 +11,10 @@ class DumaPodBase(BaseModel):
     """Base schema for DumaPod."""
 
     name: str = Field(..., min_length=3, max_length=100)
-    storage_capacity_gb: int = Field(..., gt=0)
+    storage_capacity_gb: Optional[int] = Field(None, gt=0)
+    pod_description: Optional[str] = None
     
-    enable_s3: bool = False
+    enable_s3: bool = True
     enable_wasabi: bool = False
     enable_oracle_os: bool = False
 
@@ -21,10 +22,10 @@ class DumaPodBase(BaseModel):
     use_custom_wasabi: bool = False
     use_custom_oracle: bool = False
     
-    primary_storage: StorageProvider
+    primary_storage: Optional[StorageProvider] = StorageProvider.AWS_S3
     secondary_storage: Optional[StorageProvider] = None
     
-    amount_in_usd: Decimal = Field(..., ge=0)
+    amount_in_usd: Optional[Decimal] = Field(None, ge=0)
     is_active: bool = True
 
 
@@ -38,6 +39,7 @@ class DumaPodUpdate(BaseModel):
     
     name: Optional[str] = Field(None, min_length=3, max_length=100)
     storage_capacity_gb: Optional[int] = Field(None, gt=0)
+    pod_description: Optional[str] = None
     
     enable_s3: Optional[bool] = None
     enable_wasabi: Optional[bool] = None
@@ -61,6 +63,7 @@ class DumaPodResponse(DumaPodBase):
     created_by: int
     created_at: datetime
     updated_at: datetime
+    connection_status: Dict[str, bool] = {}
 
     class Config:
         from_attributes = True

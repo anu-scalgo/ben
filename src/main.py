@@ -12,7 +12,7 @@ from .config import settings
 from .config.database import init_db, close_db
 from .config.redis import close_redis
 from .middleware.rate_limit import limiter
-from .routers import auth, plans, files, webhooks, users, dumapods, credentials
+from .routers import auth, plans, files, webhooks, users, dumapods, credentials, pod_category
 from .utils.logger import configure_logging, get_logger
 
 # Configure logging
@@ -60,8 +60,24 @@ app.add_middleware(
 # Exception handlers
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler."""
+    """Global exception handler with environment-aware error details."""
     logger.error("Unhandled exception", exc_info=exc, path=request.url.path)
+    
+    # In development/debug mode, expose detailed error information
+    if settings.debug or settings.environment.lower() in ["development", "dev"]:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "error": str(exc),
+                "type": type(exc).__name__,
+                "path": str(request.url.path),
+                "traceback": traceback.format_exc(),
+            },
+        )
+    
+    # In production mode, return generic error message
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
@@ -83,6 +99,7 @@ app.include_router(credentials.router)
 app.include_router(webhooks.router)
 app.include_router(users.router)
 app.include_router(dumapods.router)
+app.include_router(pod_category.router)
 
 
 # Root endpoint

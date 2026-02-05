@@ -33,49 +33,6 @@ class FileService:
         self.credential_service = CredentialService(db)
         self.duma_file_repo = DumaStoredFileRepository(db)
 
-
-    def _validate_pod_for_upload(self, dumapod: dict | DumaPod):
-        """Validate DumaPod for upload capability."""
-        
-        # Helper to get attr
-        def get_attr(obj, attr, default=None):
-            if isinstance(obj, dict):
-                return obj.get(attr, default)
-            return getattr(obj, attr, default)
-
-        # 1. Check Storage Capacity
-        capacity_gb = get_attr(dumapod, 'storage_capacity_gb')
-        if not capacity_gb or capacity_gb <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="DumaPod has invalid or zero storage capacity."
-            )
-
-        # 2. Check Connection Status
-        conn_status = get_attr(dumapod, 'connection_status')
-        if not conn_status:
-             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="DumaPod has no active storage connections."
-            )
-            
-        # Check if at least one enabled provider is connected
-        enable_s3 = get_attr(dumapod, 'enable_s3', False)
-        enable_wasabi = get_attr(dumapod, 'enable_wasabi', False)
-        enable_oracle = get_attr(dumapod, 'enable_oracle_os', False)
-        
-        has_valid_connection = False
-        
-        if enable_s3 and conn_status.get('aws_s3'): has_valid_connection = True
-        elif enable_wasabi and conn_status.get('wasabi'): has_valid_connection = True
-        elif enable_oracle and conn_status.get('oracle_object_storage'): has_valid_connection = True
-        
-        if not has_valid_connection:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No enabled storage provider is connected. Please check pod configuration."
-            )
-
     async def stage_upload(
         self, user_id: int, dumapod_id: int, file: UploadFile, description: Optional[str] = None
     ) -> FileResponse:
@@ -83,7 +40,7 @@ class FileService:
         Stage upload - Optimized for large files:
         1. Validate file type only (no full read)
         2. Get file size from metadata
-        3. Check capacity & Connection
+        3. Check capacity
         4. Create database record with "uploading" status
         5. Return immediately (202 Accepted)
         
@@ -107,12 +64,8 @@ class FileService:
                 detail="File size could not be determined or file is empty"
             )
         
-        # 3. Get DumaPod & Check Capacity & Connection
+        # 3. Get DumaPod & Check Capacity
         dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
-        
-        # Validate Pod Capability (Capacity > 0, Connection status)
-        self._validate_pod_for_upload(dumapod)
-
         current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
         
         # Normalize Data
@@ -122,7 +75,7 @@ class FileService:
         else:
             limit_gb = dumapod.storage_capacity_gb
             primary_storage = dumapod.primary_storage
-            
+
         # Capacity Check
         capacity_bytes = limit_gb * 1024 * 1024 * 1024
         if current_usage_bytes + file_size > capacity_bytes:
@@ -136,18 +89,6 @@ class FileService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Upload exceeds DumaPod storage capacity. Current: {current_usage_bytes / (1024**3):.2f} GB, File: {file_size / (1024**3):.2f} GB, Limit: {limit_gb} GB"
             )
-            
-        # ... rest of method
-
-    # ... in initiate_direct_upload
-        # 2. Get DumaPod & Check Capacity
-        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
-        
-        # Validate Pod Capability
-        self._validate_pod_for_upload(dumapod)
-        
-        current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
-
 
         # 4. Create Database Record with "uploading" status
         sanitized_filename = sanitize_filename(file.filename or "unnamed")
@@ -626,10 +567,6 @@ class FileService:
         
         # 2. Get DumaPod & Check Capacity
         dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
-        
-        # Validate Pod Capability
-        self._validate_pod_for_upload(dumapod)
-        
         current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
         
         # Normalize Data
@@ -850,266 +787,266 @@ class FileService:
         # 5. Return file details
         return await self.get_file_details(file_id, user_id)
 
-# Background Task Wrapper
     async def initiate_multipart_upload(
-        self,
-        user_id: int,
-        dumapod_id: int,
-        filename: str,
-        content_type: str,
-        file_size: int,
-        part_size: Optional[int] = None,
-        description: Optional[str] = None
-    ):
-        """Initiate multipart upload for large files."""
-        from ..schemas.file import InitiateMultipartUploadResponse, MultipartPartInfo
-        from ..utils.helpers import sanitize_filename
+    self,
+    user_id: int,
+    dumapod_id: int,
+    filename: str,
+    content_type: str,
+    file_size: int,
+    part_size: Optional[int] = None,
+    description: Optional[str] = None
+        ):
+    """Initiate multipart upload for large files."""
+    from ..schemas.file import InitiateMultipartUploadResponse, MultipartPartInfo
+    from ..utils.helpers import sanitize_filename
+    
+    # 1. Validate file size
+    from ..config import settings
+    # Skip file size check if MAX_FILE_SIZE_MB is set to 0 (unlimited)
+    if settings.max_file_size_mb > 0 and file_size > settings.max_file_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
+        )
+    
+    # 2. Check capacity
+    current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
+    dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+    
+    if isinstance(dumapod, dict):
+        limit_gb = dumapod.get("storage_capacity_gb")
+        primary_storage = dumapod.get("primary_storage")
+    else:
+        limit_gb = dumapod.storage_capacity_gb
+        primary_storage = dumapod.primary_storage
+    
+    limit_bytes = limit_gb * (1024 ** 3)
+    if current_usage_bytes + file_size > limit_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Upload exceeds DumaPod storage capacity"
+        )
+    
+    # 3. Calculate part size if not provided
+    if part_size is None:
+        part_size, total_parts = self.storage_repo.calculate_part_size(file_size)
+    else:
+        import math
+        total_parts = math.ceil(file_size / part_size)
+    
+    # 4. Create database record
+    sanitized_filename = sanitize_filename(filename)
+    storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
+    
+    stored_file = await self.duma_file_repo.create_file_record(
+        dumapod_id=dumapod_id,
+        user_id=user_id,
+        file_name=sanitized_filename,
+        file_type=content_type,
+        file_size=file_size,
+        storage_key=storage_key,
+        upload_status="pending_multipart"
+    )
+    
+    # 5. Initiate multipart upload in S3
+    try:
+        provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
         
-        # 1. Validate file size
-        from ..config import settings
-        # Skip file size check if MAX_FILE_SIZE_MB is set to 0 (unlimited)
-        if settings.max_file_size_mb > 0 and file_size > settings.max_file_size_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
-            )
-        
-        # 2. Check capacity
-        current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
-        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
-        
-        if isinstance(dumapod, dict):
-            limit_gb = dumapod.get("storage_capacity_gb")
-            primary_storage = dumapod.get("primary_storage")
-        else:
-            limit_gb = dumapod.storage_capacity_gb
-            primary_storage = dumapod.primary_storage
-        
-        limit_bytes = limit_gb * (1024 ** 3)
-        if current_usage_bytes + file_size > limit_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Upload exceeds DumaPod storage capacity"
-            )
-        
-        # 3. Calculate part size if not provided
-        if part_size is None:
-            part_size, total_parts = self.storage_repo.calculate_part_size(file_size)
-        else:
-            import math
-            total_parts = math.ceil(file_size / part_size)
-        
-        # 4. Create database record
-        sanitized_filename = sanitize_filename(filename)
-        storage_key = self.storage_repo.generate_key(user_id, sanitized_filename)
-        
-        stored_file = await self.duma_file_repo.create_file_record(
-            dumapod_id=dumapod_id,
-            user_id=user_id,
-            file_name=sanitized_filename,
-            file_type=content_type,
-            file_size=file_size,
-            storage_key=storage_key,
-            upload_status="pending_multipart"
+        upload_id = await self.storage_repo.initiate_multipart_upload(
+            key=storage_key,
+            content_type=content_type,
+            provider=provider_value
         )
         
-        # 5. Initiate multipart upload in S3
-        try:
-            provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
-            
-            upload_id = await self.storage_repo.initiate_multipart_upload(
-                key=storage_key,
-                content_type=content_type,
-                provider=provider_value
+        # 6. Generate presigned URLs for all parts
+        parts_data = await self.storage_repo.generate_multipart_presigned_urls(
+            key=storage_key,
+            upload_id=upload_id,
+            total_parts=total_parts,
+            provider=provider_value
+        )
+        
+        # 7. Update database with multipart info
+        from sqlalchemy import text
+        stmt = text(
+            "UPDATE duma_stored_files SET multipart_upload_id = :upload_id, "
+            "total_parts = :total_parts WHERE id = :id"
+        )
+        await self.duma_file_repo.session.execute(
+            stmt.bindparams(upload_id=upload_id, total_parts=total_parts, id=stored_file.id)
+        )
+        await self.duma_file_repo.session.commit()
+        
+        # 8. Format response
+        parts = [
+            MultipartPartInfo(
+                part_number=p['part_number'],
+                upload_url=p['upload_url'],
+                size=part_size if p['part_number'] < total_parts else (file_size % part_size or part_size)
             )
-            
-            # 6. Generate presigned URLs for all parts
-            parts_data = await self.storage_repo.generate_multipart_presigned_urls(
-                key=storage_key,
-                upload_id=upload_id,
-                total_parts=total_parts,
-                provider=provider_value
-            )
-            
-            # 7. Update database with multipart info
-            from sqlalchemy import text
-            stmt = text(
-                "UPDATE duma_stored_files SET multipart_upload_id = :upload_id, "
-                "total_parts = :total_parts WHERE id = :id"
-            )
-            await self.duma_file_repo.session.execute(
-                stmt.bindparams(upload_id=upload_id, total_parts=total_parts, id=stored_file.id)
-            )
-            await self.duma_file_repo.session.commit()
-            
-            # 8. Format response
-            parts = [
-                MultipartPartInfo(
-                    part_number=p['part_number'],
-                    upload_url=p['upload_url'],
-                    size=part_size if p['part_number'] < total_parts else (file_size % part_size or part_size)
-                )
-                for p in parts_data
-            ]
-            
-            return InitiateMultipartUploadResponse(
-                file_id=stored_file.id,
-                upload_id=upload_id,
-                storage_key=storage_key,
-                parts=parts,
-                total_parts=total_parts,
-                part_size=part_size,
-                expires_in=3600,
-                storage_provider=provider_value
-            )
-            
-        except Exception as e:
-            logger.error(f"Failed to initiate multipart upload: {e}")
-            await self.duma_file_repo.update_file_status_and_urls(
-                stored_file.id, "failed", failed_reason=str(e)
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to initiate multipart upload: {str(e)}"
-            )
+            for p in parts_data
+        ]
+        
+        return InitiateMultipartUploadResponse(
+            file_id=stored_file.id,
+            upload_id=upload_id,
+            storage_key=storage_key,
+            parts=parts,
+            total_parts=total_parts,
+            part_size=part_size,
+            expires_in=3600,
+            storage_provider=provider_value
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to initiate multipart upload: {e}")
+        await self.duma_file_repo.update_file_status_and_urls(
+            stored_file.id, "failed", failed_reason=str(e)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate multipart upload: {str(e)}"
+        )
 
     async def complete_multipart_upload(
-        self,
-        file_id: int,
-        user_id: int,
-        upload_id: str,
-        parts: list
-    ):
-        """Complete multipart upload."""
-        from ..schemas.file import FileResponse
+    self,
+    file_id: int,
+    user_id: int,
+    upload_id: str,
+    parts: list
+        ):
+    """Complete multipart upload."""
+    from ..schemas.file import FileResponse
+    
+    # 1. Get file record
+    file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
+    
+    if not file_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found"
+        )
+    
+    if file_record.upload_status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File upload already completed"
+        )
+    
+    if file_record.multipart_upload_id != upload_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid upload ID"
+        )
+    
+    # 2. Get DumaPod info
+    dumapod = await self.dumapod_service.get_dumapod(file_record.dumapod_id)
+    if isinstance(dumapod, dict):
+        primary_storage = dumapod.get("primary_storage")
+    else:
+        primary_storage = dumapod.primary_storage
+    
+    # 3. Complete multipart upload in S3
+    try:
+        provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
         
-        # 1. Get file record
-        file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
+        await self.storage_repo.complete_multipart_upload(
+            key=file_record.storage_key,
+            upload_id=upload_id,
+            parts=parts,
+            provider=provider_value
+        )
         
-        if not file_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found"
-            )
+        # 4. Generate storage URLs
+        s3_url = f"{provider_value}://{await self.storage_repo._get_bucket(provider_value)}/{file_record.storage_key}"
         
-        if file_record.upload_status == "completed":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File upload already completed"
-            )
+        # 5. Update database
+        await self.duma_file_repo.update_file_status_and_urls(
+            file_id, "completed", s3_url=s3_url
+        )
         
-        if file_record.multipart_upload_id != upload_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid upload ID"
-            )
+        # 6. Return file details
+        updated_file = await self.duma_file_repo.get_file(file_id)
         
-        # 2. Get DumaPod info
-        dumapod = await self.dumapod_service.get_dumapod(file_record.dumapod_id)
-        if isinstance(dumapod, dict):
-            primary_storage = dumapod.get("primary_storage")
-        else:
-            primary_storage = dumapod.primary_storage
+        return FileResponse(
+            id=updated_file.id,
+            dumapod_id=updated_file.dumapod_id,
+            user_id=updated_file.user_id,
+            file_name=updated_file.file_name,
+            file_type=updated_file.file_type,
+            file_size=updated_file.file_size,
+            upload_status=updated_file.upload_status,
+            upload_progress=100,
+            s3_url=updated_file.s3_url,
+            wasabi_url=updated_file.wasabi_url,
+            oracle_url=updated_file.oracle_url,
+            created_at=updated_file.created_at
+        )
         
-        # 3. Complete multipart upload in S3
-        try:
-            provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
-            
-            await self.storage_repo.complete_multipart_upload(
-                key=file_record.storage_key,
-                upload_id=upload_id,
-                parts=parts,
-                provider=provider_value
-            )
-            
-            # 4. Generate storage URLs
-            s3_url = f"{provider_value}://{await self.storage_repo._get_bucket(provider_value)}/{file_record.storage_key}"
-            
-            # 5. Update database
-            await self.duma_file_repo.update_file_status_and_urls(
-                file_id, "completed", s3_url=s3_url
-            )
-            
-            # 6. Return file details
-            updated_file = await self.duma_file_repo.get_file(file_id)
-            
-            return FileResponse(
-                id=updated_file.id,
-                dumapod_id=updated_file.dumapod_id,
-                user_id=updated_file.user_id,
-                file_name=updated_file.file_name,
-                file_type=updated_file.file_type,
-                file_size=updated_file.file_size,
-                upload_status=updated_file.upload_status,
-                upload_progress=100,
-                s3_url=updated_file.s3_url,
-                wasabi_url=updated_file.wasabi_url,
-                oracle_url=updated_file.oracle_url,
-                created_at=updated_file.created_at
-            )
-            
-        except Exception as e:
-            logger.error(f"Failed to complete multipart upload: {e}")
-            await self.duma_file_repo.update_file_status_and_urls(
-                file_id, "failed", failed_reason=str(e)
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to complete multipart upload: {str(e)}"
-            )
+    except Exception as e:
+        logger.error(f"Failed to complete multipart upload: {e}")
+        await self.duma_file_repo.update_file_status_and_urls(
+            file_id, "failed", failed_reason=str(e)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete multipart upload: {str(e)}"
+        )
 
     async def abort_multipart_upload(
-        self,
-        file_id: int,
-        user_id: int,
-        upload_id: str
-    ):
-        """Abort multipart upload."""
-        # 1. Get file record
-        file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
+    self,
+    file_id: int,
+    user_id: int,
+    upload_id: str
+        ):
+    """Abort multipart upload."""
+    # 1. Get file record
+    file_record = await self.duma_file_repo.get_by_user_and_id(user_id, file_id)
+    
+    if not file_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found"
+        )
+    
+    if file_record.multipart_upload_id != upload_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid upload ID"
+        )
+    
+    # 2. Get DumaPod info
+    dumapod = await self.dumapod_service.get_dumapod(file_record.dumapod_id)
+    if isinstance(dumapod, dict):
+        primary_storage = dumapod.get("primary_storage")
+    else:
+        primary_storage = dumapod.primary_storage
+    
+    # 3. Abort multipart upload in S3
+    try:
+        provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
         
-        if not file_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found"
-            )
+        await self.storage_repo.abort_multipart_upload(
+            key=file_record.storage_key,
+            upload_id=upload_id,
+            provider=provider_value
+        )
         
-        if file_record.multipart_upload_id != upload_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid upload ID"
-            )
+        # 4. Update database
+        await self.duma_file_repo.update_file_status_and_urls(
+            file_id, "failed", failed_reason="Upload aborted by user"
+        )
         
-        # 2. Get DumaPod info
-        dumapod = await self.dumapod_service.get_dumapod(file_record.dumapod_id)
-        if isinstance(dumapod, dict):
-            primary_storage = dumapod.get("primary_storage")
-        else:
-            primary_storage = dumapod.primary_storage
+        return {"message": "Multipart upload aborted successfully"}
         
-        # 3. Abort multipart upload in S3
-        try:
-            provider_value = primary_storage.value if hasattr(primary_storage, 'value') else primary_storage
-            
-            await self.storage_repo.abort_multipart_upload(
-                key=file_record.storage_key,
-                upload_id=upload_id,
-                provider=provider_value
-            )
-            
-            # 4. Update database
-            await self.duma_file_repo.update_file_status_and_urls(
-                file_id, "failed", failed_reason="Upload aborted by user"
-            )
-            
-            return {"message": "Multipart upload aborted successfully"}
-            
-        except Exception as e:
-            logger.error(f"Failed to abort multipart upload: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to abort multipart upload: {str(e)}"
-            )
+    except Exception as e:
+        logger.error(f"Failed to abort multipart upload: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to abort multipart upload: {str(e)}"
+        )
+# Background Task Wrapper
 async def run_background_upload_wrapper(
     file_id: int,
     file: UploadFile,

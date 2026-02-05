@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, String, Integer, ForeignKey
+from sqlalchemy import BigInteger, DateTime, String, Integer, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -22,8 +22,16 @@ class DumaStoredFile(Base):
     file_name: Mapped[str] = mapped_column(String, nullable=False)
     file_type: Mapped[str] = mapped_column(String, nullable=False)  # content_type
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    storage_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # S3 key/path
+    
+    # Multipart upload fields
+    multipart_upload_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # AWS upload ID
+    total_parts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Number of parts
+    uploaded_parts: Mapped[Optional[int]] = mapped_column(Integer, default=0, nullable=True)  # Parts completed
+    
     upload_status: Mapped[str] = mapped_column(String, default="pending", nullable=True)
     upload_progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Store URLs/Links for each provider
     s3_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)

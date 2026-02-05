@@ -153,7 +153,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Gold Storage Plan\",\n    \"storage_capacity_gb\": 1000,\n    \"enable_s3\": true,\n    \"enable_wasabi\": false,\n    \"enable_oracle_os\": false,\n    \"use_custom_s3\": false,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false,\n    \"primary_storage\": \"aws_s3\",\n    \"amount_in_usd\": 99.99,\n    \"is_active\": true\n}",
+							"raw": "{\n    \"name\": \"Gold Storage Plan\",\n    \"pod_description\": \"Premium storage plan for enterprise users\",\n    \"storage_capacity_gb\": 1000,\n    \"enable_s3\": true,\n    \"enable_wasabi\": false,\n    \"enable_oracle_os\": false,\n    \"use_custom_s3\": false,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false,\n    \"primary_storage\": \"aws_s3\",\n    \"amount_in_usd\": 99.99,\n    \"is_active\": true\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -169,6 +169,33 @@
 								"dumapods"
 							]
 						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Pod (Minimal)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Minimal Pod Plan\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/dumapods",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods"
+							]
+						},
+						"description": "Demonstrates creating a pod with only the mandatory 'name' field."
 					},
 					"response": []
 				},
@@ -214,7 +241,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Gold Storage Plan (Updated)\",\n    \"amount_in_usd\": 109.99,\n    \"use_custom_s3\": true,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false\n}",
+							"raw": "{\n    \"name\": \"Gold Storage Plan (Updated)\",\n    \"pod_description\": \"Updated description\",\n    \"amount_in_usd\": 109.99,\n    \"use_custom_s3\": true,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -247,6 +274,25 @@
 							"path": [
 								"dumapods",
 								"{{pod_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Check Pod Connection",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/dumapods/{{pod_id}}/check-connection",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods",
+								"{{pod_id}}",
+								"check-connection"
 							]
 						}
 					},
@@ -392,7 +438,8 @@
 								"files",
 								"upload"
 							]
-						}
+						},
+                        "description": "Upload a file to a specific DumaPod. \n\n**Validation Requirements**:\n- **Storage Capacity**: The pod must have sufficient remaining capacity.\n- **Connection Status**: At least one enabled storage provider (S3, Wasabi, or Oracle) must have a valid connection (status=True). If checking connections failed, the upload will be rejected."
 					},
 					"response": []
 				},
@@ -442,6 +489,227 @@
 					"response": []
 				},
 				{
+					"name": "Initiate Direct Upload (Recommended)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.environment.set(\"file_id\", jsonData.file_id);",
+									"pm.environment.set(\"upload_url\", jsonData.upload_url);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dumapod_id\": {{pod_id}},\n    \"filename\": \"document.pdf\",\n    \"content_type\": \"application/pdf\",\n    \"file_size\": 1048576,\n    \"description\": \"Test direct upload\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/initiate-upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"initiate-upload"
+							]
+						},
+						"description": "Step 1: Get presigned URL for direct S3 upload. This is the recommended upload method for better performance.\n\n**Server-Side Validation**:\n- Checks if Pod has sufficient storage capacity.\n- Checks if the enabled storage provider has a valid connection status."
+					},
+					"response": []
+				},
+				{
+					"name": "Upload to S3 (Step 2)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/pdf",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "file",
+							"file": {
+								"src": ""
+							}
+						},
+						"url": {
+							"raw": "{{upload_url}}",
+							"host": [
+								"{{upload_url}}"
+							]
+						},
+						"description": "Step 2: Upload file directly to S3 using the presigned URL. \n\n**Instructions**:\n1. Run 'Initiate Direct Upload' first to get the upload_url\n2. In Body tab, select 'binary' and choose your file\n3. Make sure Content-Type header matches your file type\n4. Click Send\n5. You should get a 200 OK response from S3"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Upload",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/files/confirm-upload/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"confirm-upload",
+								"{{file_id}}"
+							]
+						},
+						"description": "Step 3: Confirm that file was uploaded to S3. Call this after uploading to the presigned URL from initiate-upload."
+					},
+					"response": []
+				},
+				{
+					"name": "Initiate Multipart Upload (Large Files >100MB)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.environment.set(\"file_id\", jsonData.file_id);",
+									"pm.environment.set(\"multipart_upload_id\", jsonData.upload_id);",
+									"pm.environment.set(\"part_1_url\", jsonData.parts[0].upload_url);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"dumapod_id\": {{pod_id}},\n    \"filename\": \"large-file.mp4\",\n    \"content_type\": \"video/mp4\",\n    \"file_size\": 524288000,\n    \"description\": \"Large file upload test\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/initiate-multipart-upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"initiate-multipart-upload"
+							]
+						},
+						"description": "For files >100MB, use multipart upload. Returns presigned URLs for each part."
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Part to S3 (Multipart)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "video/mp4",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "file",
+							"file": {
+								"src": ""
+							}
+						},
+						"url": {
+							"raw": "{{part_1_url}}",
+							"host": [
+								"{{part_1_url}}"
+							]
+						},
+						"description": "Upload each part to S3. Save the ETag from response headers!"
+					},
+					"response": []
+				},
+				{
+					"name": "Complete Multipart Upload",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"upload_id\": \"{{multipart_upload_id}}\",\n    \"parts\": [\n        {\"part_number\": 1, \"etag\": \"abc123\"},\n        {\"part_number\": 2, \"etag\": \"def456\"}\n    ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/complete-multipart-upload/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"complete-multipart-upload",
+								"{{file_id}}"
+							]
+						},
+						"description": "Complete multipart upload with all part ETags"
+					},
+					"response": []
+				},
+				{
+					"name": "Abort Multipart Upload",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"upload_id\": \"{{multipart_upload_id}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/files/abort-multipart-upload/{{file_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"files",
+								"abort-multipart-upload",
+								"{{file_id}}"
+							]
+						},
+						"description": "Cancel multipart upload and cleanup"
+					},
+					"response": []
+				},
+				{
 					"name": "Download File",
 					"request": {
 						"method": "GET",
@@ -455,6 +723,117 @@
 								"files",
 								"{{file_id}}",
 								"download"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Pod Categories",
+			"item": [
+				{
+					"name": "Create Category (Admin)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"New Category\",\n    \"is_active\": true\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/pod-categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List Categories",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/pod-categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Category",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/pod-categories/{{category_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories",
+								"{{category_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Category (Admin)",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Updated Category Name\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/pod-categories/{{category_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories",
+								"{{category_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Category (Admin)",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/pod-categories/{{category_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories",
+								"{{category_id}}"
 							]
 						}
 					},
@@ -516,6 +895,26 @@
 		},
 		{
 			"key": "file_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "upload_url",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "multipart_upload_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "part_1_url",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "category_id",
 			"value": "1",
 			"type": "string"
 		}

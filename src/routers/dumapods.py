@@ -75,3 +75,18 @@ async def delete_dumapod(
     check_admin_privileges(current_user)
     service = DumaPodService(db)
     await service.delete_dumapod(pod_id)
+
+
+@router.post("/{pod_id}/check-connection", response_model=dict[str, bool])
+async def check_pod_connection(
+    pod_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Manually check and update connectivity status for a DumaPod.
+    Returns the updated status map.
+    """
+    check_admin_privileges(current_user)
+    service = DumaPodService(db)
+    return await service.check_and_update_connection_status(pod_id)

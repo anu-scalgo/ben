@@ -33,6 +33,49 @@ class FileService:
         self.credential_service = CredentialService(db)
         self.duma_file_repo = DumaStoredFileRepository(db)
 
+
+    def _validate_pod_for_upload(self, dumapod: dict | DumaPod):
+        """Validate DumaPod for upload capability."""
+        
+        # Helper to get attr
+        def get_attr(obj, attr, default=None):
+            if isinstance(obj, dict):
+                return obj.get(attr, default)
+            return getattr(obj, attr, default)
+
+        # 1. Check Storage Capacity
+        capacity_gb = get_attr(dumapod, 'storage_capacity_gb')
+        if not capacity_gb or capacity_gb <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="DumaPod has invalid or zero storage capacity."
+            )
+
+        # 2. Check Connection Status
+        conn_status = get_attr(dumapod, 'connection_status')
+        if not conn_status:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="DumaPod has no active storage connections."
+            )
+            
+        # Check if at least one enabled provider is connected
+        enable_s3 = get_attr(dumapod, 'enable_s3', False)
+        enable_wasabi = get_attr(dumapod, 'enable_wasabi', False)
+        enable_oracle = get_attr(dumapod, 'enable_oracle_os', False)
+        
+        has_valid_connection = False
+        
+        if enable_s3 and conn_status.get('aws_s3'): has_valid_connection = True
+        elif enable_wasabi and conn_status.get('wasabi'): has_valid_connection = True
+        elif enable_oracle and conn_status.get('oracle_object_storage'): has_valid_connection = True
+        
+        if not has_valid_connection:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No enabled storage provider is connected. Please check pod configuration."
+            )
+
     async def stage_upload(
         self, user_id: int, dumapod_id: int, file: UploadFile, description: Optional[str] = None
     ) -> FileResponse:
@@ -40,7 +83,7 @@ class FileService:
         Stage upload - Optimized for large files:
         1. Validate file type only (no full read)
         2. Get file size from metadata
-        3. Check capacity
+        3. Check capacity & Connection
         4. Create database record with "uploading" status
         5. Return immediately (202 Accepted)
         
@@ -64,8 +107,12 @@ class FileService:
                 detail="File size could not be determined or file is empty"
             )
         
-        # 3. Get DumaPod & Check Capacity
+        # 3. Get DumaPod & Check Capacity & Connection
         dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        
+        # Validate Pod Capability (Capacity > 0, Connection status)
+        self._validate_pod_for_upload(dumapod)
+
         current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
         
         # Normalize Data
@@ -75,7 +122,7 @@ class FileService:
         else:
             limit_gb = dumapod.storage_capacity_gb
             primary_storage = dumapod.primary_storage
-
+            
         # Capacity Check
         capacity_bytes = limit_gb * 1024 * 1024 * 1024
         if current_usage_bytes + file_size > capacity_bytes:
@@ -89,6 +136,18 @@ class FileService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Upload exceeds DumaPod storage capacity. Current: {current_usage_bytes / (1024**3):.2f} GB, File: {file_size / (1024**3):.2f} GB, Limit: {limit_gb} GB"
             )
+            
+        # ... rest of method
+
+    # ... in initiate_direct_upload
+        # 2. Get DumaPod & Check Capacity
+        dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        
+        # Validate Pod Capability
+        self._validate_pod_for_upload(dumapod)
+        
+        current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
+
 
         # 4. Create Database Record with "uploading" status
         sanitized_filename = sanitize_filename(file.filename or "unnamed")
@@ -567,6 +626,10 @@ class FileService:
         
         # 2. Get DumaPod & Check Capacity
         dumapod = await self.dumapod_service.get_dumapod(dumapod_id)
+        
+        # Validate Pod Capability
+        self._validate_pod_for_upload(dumapod)
+        
         current_usage_bytes = await self.duma_file_repo.get_total_usage(dumapod_id)
         
         # Normalize Data

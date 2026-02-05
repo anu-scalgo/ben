@@ -18,6 +18,7 @@ from src.models.user import User
 from src.models.dumapod import DumaPod
 from src.models.credential import StorageCredential
 from src.models.duma_stored_file import DumaStoredFile
+from src.models.pod_category import PodCategory
 
 # this is the Alembic Config object
 config = context.config

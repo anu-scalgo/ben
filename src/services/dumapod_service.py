@@ -38,6 +38,68 @@ class DumaPodService:
             if secondary == StorageProvider.ORACLE_OS and not enable_oracle:
                 raise HTTPException(status_code=400, detail="Oracle Object Storage must be enabled to be used as Secondary Storage")
 
+    async def _calculate_connection_status(self, pod: DumaPod = None, pod_data: DumaPodCreate | DumaPodUpdate = None) -> dict[str, bool]:
+        """Calculate connection status for a pod configuration."""
+        status_map = {}
+        from ..repositories.storage_repo import StorageRepository
+        storage_repo = StorageRepository()
+        
+        # Helper to get attribute from object or dict
+        def get_attr(obj, attr, default=None):
+            if obj is None:
+                return default
+            if isinstance(obj, dict):
+                return obj.get(attr, default)
+            return getattr(obj, attr, default)
+
+        # Determine effective config
+        # For pod_data (Create/Update), we use it if present and not None. Fallback to pod (existing).
+        
+        def get_effective_val(attr_name, default_val=False):
+            val = get_attr(pod_data, attr_name)
+            if val is not None:
+                return val
+            return get_attr(pod, attr_name, default_val)
+
+        enable_s3 = get_effective_val('enable_s3')
+        use_custom_s3 = get_effective_val('use_custom_s3')
+        
+        enable_wasabi = get_effective_val('enable_wasabi')
+        use_custom_wasabi = get_effective_val('use_custom_wasabi')
+        
+        enable_oracle = get_effective_val('enable_oracle_os')
+        use_custom_oracle = get_effective_val('use_custom_oracle')
+
+        async def check(provider, is_custom):
+            if is_custom:
+                # For custom credentials, we need to access credentials list
+                # Use pod object primarily if available
+                # If pod is dict, credentials might be loaded? repo.get_all loads them.
+                creds_list = []
+                if pod:
+                    if isinstance(pod, dict):
+                         creds_list = pod.get('credentials', [])
+                    else:
+                         creds_list = getattr(pod, 'credentials', [])
+                
+                if creds_list:
+                    # Filter for provider
+                    cred = next((c for c in creds_list if (isinstance(c, dict) and c.get('provider') == provider) or (hasattr(c, 'provider') and c.provider == provider)), None)
+                    if cred:
+                        return await storage_repo.check_connectivity(provider, cred)
+                return False 
+            else:
+                 return await storage_repo.check_connectivity(provider)
+
+        if enable_s3:
+            status_map[StorageProvider.AWS_S3] = await check(StorageProvider.AWS_S3, use_custom_s3)
+        if enable_wasabi:
+            status_map[StorageProvider.WASABI] = await check(StorageProvider.WASABI, use_custom_wasabi)
+        if enable_oracle:
+            status_map[StorageProvider.ORACLE_OS] = await check(StorageProvider.ORACLE_OS, use_custom_oracle)
+            
+        return status_map
+
     async def create_dumapod(self, pod_data: DumaPodCreate, user_id: int) -> DumaPod:
         """Create a new DumaPod."""
         
@@ -49,14 +111,21 @@ class DumaPodService:
             pod_data.enable_oracle_os
         )
         
-        # Check unique namme? 
-        # For now, let DB constraint handle it or catch integrity error in repo.
-        # Ideally, check here.
-        # We can implement get_by_name in repo later.
+        # Check for existing pod with same name
+        existing_pod = await self.repo.get_by_name(pod_data.name)
+        if existing_pod:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"DumaPod with name '{pod_data.name}' already exists."
+            )
         
+        # Calculate initial status
+        conn_status = await self._calculate_connection_status(pod_data=pod_data)
+
         return await self.repo.create(
             **pod_data.model_dump(),
-            created_by=user_id
+            created_by=user_id,
+            connection_status=conn_status
         )
 
     async def get_dumapod(self, pod_id: int) -> DumaPod:
@@ -64,10 +133,6 @@ class DumaPodService:
         pod = await self.repo.get_by_id(pod_id)
         if not pod:
             raise HTTPException(status_code=404, detail="DumaPod not found")
-        # BaseRepository returns dict? No, I updated BaseRepository to return dicts in get_by_id but my Typed annotation said Optional[Dict].
-        # Wait, BaseRepository methods return Dicts because of `_to_dict`.
-        # Previous User implementation seemed to rely on User objects.
-        # Let's check BaseRepository implementation again.
         return pod
 
     async def get_all_dumapods(self, skip: int = 0, limit: int = 100) -> List[DumaPod]:
@@ -84,7 +149,14 @@ class DumaPodService:
         if pod_data.use_custom_oracle is True:
             await self._validate_credential_connectivity(pod_id, StorageProvider.ORACLE_OS)
 
-        return await self.repo.update(pod_id, **pod_data.model_dump(exclude_unset=True))
+        updated_pod = await self.repo.update(pod_id, **pod_data.model_dump(exclude_unset=True))
+        
+        new_status = await self._calculate_connection_status(pod=updated_pod)
+        
+        if new_status != updated_pod.connection_status:
+             updated_pod = await self.repo.update(pod_id, connection_status=new_status)
+
+        return updated_pod
 
     async def _validate_credential_connectivity(self, pod_id: int, provider: StorageProvider):
         """Helper to validate credential connectivity."""
@@ -117,3 +189,16 @@ class DumaPodService:
         # Implementation Plan said "Soft delete (set is_active=False)".
         
         return await self.repo.update(pod_id, is_active=False)
+
+    async def check_and_update_connection_status(self, pod_id: int) -> dict[str, bool]:
+        """Check and update connection status for a pod."""
+        pod = await self.get_dumapod(pod_id)
+        
+        # Calculate new status based on current pod config
+        new_status = await self._calculate_connection_status(pod=pod)
+        
+        # Update if changed
+        if new_status != pod.connection_status:
+             pod = await self.repo.update(pod_id, connection_status=new_status)
+             
+        return pod.connection_status

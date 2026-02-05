@@ -153,7 +153,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Gold Storage Plan\",\n    \"storage_capacity_gb\": 1000,\n    \"enable_s3\": true,\n    \"enable_wasabi\": false,\n    \"enable_oracle_os\": false,\n    \"use_custom_s3\": false,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false,\n    \"primary_storage\": \"aws_s3\",\n    \"amount_in_usd\": 99.99,\n    \"is_active\": true\n}",
+							"raw": "{\n    \"name\": \"Gold Storage Plan\",\n    \"pod_description\": \"Premium storage plan for enterprise users\",\n    \"storage_capacity_gb\": 1000,\n    \"enable_s3\": true,\n    \"enable_wasabi\": false,\n    \"enable_oracle_os\": false,\n    \"use_custom_s3\": false,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false,\n    \"primary_storage\": \"aws_s3\",\n    \"amount_in_usd\": 99.99,\n    \"is_active\": true\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -169,6 +169,33 @@
 								"dumapods"
 							]
 						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Pod (Minimal)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Minimal Pod Plan\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/dumapods",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods"
+							]
+						},
+						"description": "Demonstrates creating a pod with only the mandatory 'name' field."
 					},
 					"response": []
 				},
@@ -214,7 +241,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Gold Storage Plan (Updated)\",\n    \"amount_in_usd\": 109.99,\n    \"use_custom_s3\": true,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false\n}",
+							"raw": "{\n    \"name\": \"Gold Storage Plan (Updated)\",\n    \"pod_description\": \"Updated description\",\n    \"amount_in_usd\": 109.99,\n    \"use_custom_s3\": true,\n    \"use_custom_wasabi\": false,\n    \"use_custom_oracle\": false\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -247,6 +274,25 @@
 							"path": [
 								"dumapods",
 								"{{pod_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Check Pod Connection",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/dumapods/{{pod_id}}/check-connection",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dumapods",
+								"{{pod_id}}",
+								"check-connection"
 							]
 						}
 					},
@@ -392,7 +438,8 @@
 								"files",
 								"upload"
 							]
-						}
+						},
+                        "description": "Upload a file to a specific DumaPod. \n\n**Validation Requirements**:\n- **Storage Capacity**: The pod must have sufficient remaining capacity.\n- **Connection Status**: At least one enabled storage provider (S3, Wasabi, or Oracle) must have a valid connection (status=True). If checking connections failed, the upload will be rejected."
 					},
 					"response": []
 				},
@@ -478,7 +525,7 @@
 								"initiate-upload"
 							]
 						},
-						"description": "Step 1: Get presigned URL for direct S3 upload. This is the recommended upload method for better performance."
+						"description": "Step 1: Get presigned URL for direct S3 upload. This is the recommended upload method for better performance.\n\n**Server-Side Validation**:\n- Checks if Pod has sufficient storage capacity.\n- Checks if the enabled storage provider has a valid connection status."
 					},
 					"response": []
 				},
@@ -682,6 +729,117 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "Pod Categories",
+			"item": [
+				{
+					"name": "Create Category (Admin)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"New Category\",\n    \"is_active\": true\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/pod-categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List Categories",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/pod-categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Category",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/pod-categories/{{category_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories",
+								"{{category_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Category (Admin)",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Updated Category Name\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/pod-categories/{{category_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories",
+								"{{category_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Category (Admin)",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/pod-categories/{{category_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pod-categories",
+								"{{category_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
 		}
 	],
 	"auth": {
@@ -753,6 +911,11 @@
 		{
 			"key": "part_1_url",
 			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "category_id",
+			"value": "1",
 			"type": "string"
 		}
 	]
